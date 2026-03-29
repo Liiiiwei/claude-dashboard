@@ -14,6 +14,14 @@ const TAG_COLORS: Record<string, string> = {
   n8n: "bg-rose-600",
 };
 
+// 活躍度顏色：7天內=綠、30天內=黃、超過=灰
+function activityColor(isoDate: string): string {
+  const days = Math.floor((Date.now() - new Date(isoDate).getTime()) / 86400000);
+  if (days <= 7) return "bg-green-400";
+  if (days <= 30) return "bg-yellow-400";
+  return "bg-gray-600";
+}
+
 function timeAgo(isoDate: string): string {
   const diff = Date.now() - new Date(isoDate).getTime();
   const minutes = Math.floor(diff / 60000);
@@ -49,7 +57,8 @@ export default function ProjectCard({ project }: Props) {
 
   return (
     <div className="bg-gray-900 rounded-lg p-4 border border-gray-800 hover:border-gray-700 transition-colors">
-      <div className="mb-2">
+      <div className="flex items-start gap-2 mb-2">
+        <span className={`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 ${activityColor(project.lastModified)}`} title="活躍度" />
         <h3 className="font-bold text-base break-words">{project.name}</h3>
       </div>
 
@@ -84,9 +93,9 @@ export default function ProjectCard({ project }: Props) {
         <button
           onClick={() => handleOpen("vscode")}
           className="flex-1 px-3 py-2 text-sm bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors text-center text-white"
-          title="在 VS Code 中開啟"
+          title="在 Antigravity 中開啟"
         >
-          ▶ Code
+          ▶ Antigravity
         </button>
       </div>
     </div>

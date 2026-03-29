@@ -11,9 +11,23 @@ export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTag, setActiveTag] = useState("全部");
-  const [sortBy, setSortBy] = useState<"lastModified" | "name">("lastModified");
-  const [view, setView] = useState<"list" | "kanban">("kanban");
+  const [activeTag, setActiveTag] = useState(() => {
+    if (typeof window !== "undefined") return localStorage.getItem("dashboard-tag") || "全部";
+    return "全部";
+  });
+  const [sortBy, setSortBy] = useState<"lastModified" | "name">(() => {
+    if (typeof window !== "undefined") return (localStorage.getItem("dashboard-sort") as "lastModified" | "name") || "lastModified";
+    return "lastModified";
+  });
+  const [view, setView] = useState<"list" | "kanban">(() => {
+    if (typeof window !== "undefined") return (localStorage.getItem("dashboard-view") as "list" | "kanban") || "kanban";
+    return "kanban";
+  });
+
+  // 偏好變更時存入 localStorage
+  useEffect(() => { localStorage.setItem("dashboard-tag", activeTag); }, [activeTag]);
+  useEffect(() => { localStorage.setItem("dashboard-sort", sortBy); }, [sortBy]);
+  useEffect(() => { localStorage.setItem("dashboard-view", view); }, [view]);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -76,9 +90,17 @@ export default function Dashboard() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold">專案儀表板</h1>
-          <p className="text-gray-400 text-sm mt-1">
-            {projects.length} 個專案
-          </p>
+          <div className="flex items-center gap-3 mt-1 text-sm">
+            <span className="text-gray-400">{projects.length} 個專案</span>
+            {projects.length > 0 && (
+              <>
+                <span className="text-blue-400">{projects.filter(p => p.status === "進行中").length} 進行中</span>
+                <span className="text-gray-500">{projects.filter(p => p.status === "待辦").length} 待辦</span>
+                <span className="text-green-400">{projects.filter(p => p.status === "已完成").length} 已完成</span>
+                <span className="text-yellow-400">{projects.filter(p => p.status === "暫停").length} 暫停</span>
+              </>
+            )}
+          </div>
         </div>
         <button
           onClick={fetchProjects}
