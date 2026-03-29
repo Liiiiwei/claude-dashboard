@@ -13,7 +13,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState("全部");
   const [sortBy, setSortBy] = useState<"lastModified" | "name">("lastModified");
-  const [view, setView] = useState<"list" | "kanban">("list");
+  const [view, setView] = useState<"list" | "kanban">("kanban");
 
   const fetchProjects = useCallback(async () => {
     try {

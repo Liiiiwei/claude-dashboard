@@ -48,10 +48,10 @@ export default function FilterBar({
       </div>
 
       <div className="flex items-center gap-2">
-        <div className="flex bg-gray-800 rounded overflow-hidden">
+        <div className="flex bg-gray-800 rounded-lg overflow-hidden">
           <button
             onClick={() => onViewChange("list")}
-            className={`px-3 py-1.5 text-xs transition-colors ${
+            className={`px-5 py-2 text-sm font-medium transition-colors ${
               view === "list" ? "bg-gray-600 text-white" : "text-gray-400 hover:text-gray-200"
             }`}
           >
@@ -59,7 +59,7 @@ export default function FilterBar({
           </button>
           <button
             onClick={() => onViewChange("kanban")}
-            className={`px-3 py-1.5 text-xs transition-colors ${
+            className={`px-5 py-2 text-sm font-medium transition-colors ${
               view === "kanban" ? "bg-gray-600 text-white" : "text-gray-400 hover:text-gray-200"
             }`}
           >
