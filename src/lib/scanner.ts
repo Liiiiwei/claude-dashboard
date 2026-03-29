@@ -2,6 +2,7 @@ import { readdir, stat, readFile, access } from "fs/promises";
 import { join } from "path";
 import { execSync } from "child_process";
 import type { Project } from "./types";
+import { readConfig } from "./config";
 
 const SCAN_DIR =
   process.env.SCAN_DIR ||
@@ -125,6 +126,7 @@ function getLastCommit(projectPath: string): string | null {
 
 export async function scanProjects(): Promise<Project[]> {
   const entries = await readdir(SCAN_DIR, { withFileTypes: true });
+  const config = await readConfig();
   const projects: Project[] = [];
 
   for (const entry of entries) {
@@ -144,6 +146,7 @@ export async function scanProjects(): Promise<Project[]> {
       tags,
       lastModified: projectStat.mtime.toISOString(),
       lastCommit: tags.includes("Git") ? getLastCommit(projectPath) : null,
+      status: config[entry.name]?.status || "待辦",
     });
   }
 

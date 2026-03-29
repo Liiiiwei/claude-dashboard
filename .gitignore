@@ -42,3 +42,6 @@ next-env.d.ts
 
 # superpowers
 .superpowers/
+
+# 專案狀態設定檔（使用者個人資料）
+projects-config.json
