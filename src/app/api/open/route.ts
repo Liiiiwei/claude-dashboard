@@ -19,8 +19,7 @@ export async function POST(request: NextRequest) {
     if (action === "finder") {
       execSync(`open "${path}"`);
     } else {
-      // 用 open -a 確保不受 PATH 限制
-      execSync(`open -a "Visual Studio Code" "${path}"`);
+      execSync(`open -a "Antigravity" "${path}"`);
     }
     return NextResponse.json({ success: true });
   } catch (error) {
