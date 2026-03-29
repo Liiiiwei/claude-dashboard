@@ -51,7 +51,7 @@ export default function KanbanBoard({ projects, onStatusChange }: Props) {
   };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
       {COLUMNS.map(({ status, color }) => {
         const columnProjects = projects.filter((p) => p.status === status);
         const isOver = dropTarget === status;
@@ -62,20 +62,20 @@ export default function KanbanBoard({ projects, onStatusChange }: Props) {
             onDragOver={(e) => handleDragOver(e, status)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, status)}
-            className={`border-t-2 ${color} rounded-lg p-3 min-h-[200px] transition-colors ${
+            className={`border-t-2 ${color} rounded-lg p-4 min-h-[200px] transition-colors ${
               isOver ? "bg-gray-800/80" : "bg-gray-900/50"
             }`}
           >
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-sm">{status}</h3>
+              <h3 className="font-semibold">{status}</h3>
               <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded-full">
                 {columnProjects.length}
               </span>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-4">
               {columnProjects.length === 0 ? (
-                <p className={`text-xs text-center py-8 transition-colors ${
-                  isOver ? "text-gray-400" : "text-gray-600"
+                <p className={`text-sm text-center py-10 transition-colors ${
+                  isOver ? "text-gray-300" : "text-gray-500"
                 }`}>
                   {isOver ? "放開以移動到這裡" : "沒有專案"}
                 </p>
