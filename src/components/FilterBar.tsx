@@ -24,7 +24,7 @@ export default function FilterBar({
       <div className="flex flex-wrap gap-2">
         <button
           onClick={() => onTagChange("全部")}
-          className={`px-3 py-1 text-sm rounded-full transition-colors ${
+          className={`px-4 py-2 text-sm rounded-full transition-colors ${
             activeTag === "全部"
               ? "bg-white text-gray-900"
               : "bg-gray-800 text-gray-300 hover:bg-gray-700"
@@ -36,7 +36,7 @@ export default function FilterBar({
           <button
             key={tag}
             onClick={() => onTagChange(tag)}
-            className={`px-3 py-1 text-sm rounded-full transition-colors ${
+            className={`px-4 py-2 text-sm rounded-full transition-colors ${
               activeTag === tag
                 ? "bg-white text-gray-900"
                 : "bg-gray-800 text-gray-300 hover:bg-gray-700"
