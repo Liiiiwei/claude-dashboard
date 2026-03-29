@@ -124,6 +124,38 @@ function getLastCommit(projectPath: string): string | null {
   }
 }
 
+function getGitInfo(projectPath: string): { branch: string; dirty: number } | null {
+  try {
+    const branch = execSync("git rev-parse --abbrev-ref HEAD", {
+      cwd: projectPath,
+      timeout: 3000,
+      encoding: "utf-8",
+    }).trim();
+
+    const status = execSync("git status --porcelain", {
+      cwd: projectPath,
+      timeout: 3000,
+      encoding: "utf-8",
+    });
+    const dirty = status.trim() ? status.trim().split("\n").length : 0;
+
+    return { branch, dirty };
+  } catch {
+    return null;
+  }
+}
+
+async function checkDevScript(projectPath: string): Promise<boolean> {
+  try {
+    const pkg = JSON.parse(
+      await readFile(join(projectPath, "package.json"), "utf-8")
+    );
+    return !!pkg.scripts?.dev;
+  } catch {
+    return false;
+  }
+}
+
 export async function scanProjects(): Promise<Project[]> {
   const entries = await readdir(SCAN_DIR, { withFileTypes: true });
   const config = await readConfig();
@@ -134,10 +166,13 @@ export async function scanProjects(): Promise<Project[]> {
     const projectPath = join(SCAN_DIR, entry.name);
     const projectStat = await stat(projectPath);
 
-    const [tags, description] = await Promise.all([
+    const [tags, description, hasDevScript] = await Promise.all([
       detectTags(projectPath),
       readDescription(projectPath),
+      checkDevScript(projectPath),
     ]);
+
+    const gitInfo = tags.includes("Git") ? getGitInfo(projectPath) : null;
 
     projects.push({
       name: entry.name,
@@ -147,6 +182,11 @@ export async function scanProjects(): Promise<Project[]> {
       lastModified: projectStat.mtime.toISOString(),
       lastCommit: tags.includes("Git") ? getLastCommit(projectPath) : null,
       status: config[entry.name]?.status || "待辦",
+      note: config[entry.name]?.note || "",
+      group: config[entry.name]?.group || "",
+      git: gitInfo,
+      hasDevScript,
+      priority: config[entry.name]?.priority ?? 999,
     });
   }
 

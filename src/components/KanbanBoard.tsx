@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import type { Project, ProjectStatus } from "@/lib/types";
 import ProjectCard from "./ProjectCard";
 
@@ -14,52 +14,109 @@ const COLUMNS: { status: ProjectStatus; color: string }[] = [
 interface Props {
   projects: Project[];
   onStatusChange: (name: string, status: ProjectStatus) => void;
+  onUpdate?: () => void;
+  allGroups?: string[];
 }
 
-export default function KanbanBoard({ projects, onStatusChange }: Props) {
+export default function KanbanBoard({ projects, onStatusChange, onUpdate, allGroups }: Props) {
   const [draggedProject, setDraggedProject] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<ProjectStatus | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const dragOverCardRef = useRef<string | null>(null);
 
   const handleDragStart = (projectName: string) => {
     setDraggedProject(projectName);
   };
 
-  const handleDragOver = (e: React.DragEvent, status: ProjectStatus) => {
+  const handleDragOverColumn = (e: React.DragEvent, status: ProjectStatus) => {
     e.preventDefault();
     setDropTarget(status);
   };
 
-  const handleDragLeave = () => {
-    setDropTarget(null);
+  const handleDragOverCard = (e: React.DragEvent, status: ProjectStatus, index: number, projectName: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDropTarget(status);
+    if (dragOverCardRef.current !== projectName) {
+      dragOverCardRef.current = projectName;
+      setDropIndex(index);
+    }
   };
 
-  const handleDrop = (e: React.DragEvent, status: ProjectStatus) => {
+  const handleDragLeave = () => {
+    setDropTarget(null);
+    setDropIndex(null);
+    dragOverCardRef.current = null;
+  };
+
+  const handleDrop = async (e: React.DragEvent, status: ProjectStatus) => {
     e.preventDefault();
     setDropTarget(null);
-    if (draggedProject) {
-      const project = projects.find((p) => p.name === draggedProject);
-      if (project && project.status !== status) {
-        onStatusChange(draggedProject, status);
+    setDropIndex(null);
+    dragOverCardRef.current = null;
+
+    if (!draggedProject) return;
+
+    const project = projects.find((p) => p.name === draggedProject);
+    if (!project) return;
+
+    const sameColumn = project.status === status;
+
+    if (sameColumn && dropIndex !== null) {
+      // 同欄位內排序
+      const columnProjects = projects
+        .filter((p) => p.status === status)
+        .sort((a, b) => a.priority - b.priority);
+
+      const fromIdx = columnProjects.findIndex((p) => p.name === draggedProject);
+      if (fromIdx === -1 || fromIdx === dropIndex) {
+        setDraggedProject(null);
+        return;
       }
+
+      const reordered = [...columnProjects];
+      const [moved] = reordered.splice(fromIdx, 1);
+      reordered.splice(dropIndex, 0, moved);
+
+      // 更新優先級
+      const updates = reordered.map((p, i) => ({ name: p.name, priority: i }));
+      try {
+        await fetch("/api/projects", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "_batch", field: "priority", value: updates }),
+        });
+        onUpdate?.();
+      } catch {
+        // 靜默失敗
+      }
+    } else if (!sameColumn) {
+      // 跨欄位移動
+      onStatusChange(draggedProject, status);
     }
+
     setDraggedProject(null);
   };
 
   const handleDragEnd = () => {
     setDraggedProject(null);
     setDropTarget(null);
+    setDropIndex(null);
+    dragOverCardRef.current = null;
   };
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
       {COLUMNS.map(({ status, color }) => {
-        const columnProjects = projects.filter((p) => p.status === status);
+        const columnProjects = projects
+          .filter((p) => p.status === status)
+          .sort((a, b) => a.priority - b.priority);
         const isOver = dropTarget === status;
 
         return (
           <div
             key={status}
-            onDragOver={(e) => handleDragOver(e, status)}
+            onDragOver={(e) => handleDragOverColumn(e, status)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, status)}
             className={`border-t-2 ${color} rounded-lg p-4 min-h-[200px] transition-colors ${
@@ -80,17 +137,22 @@ export default function KanbanBoard({ projects, onStatusChange }: Props) {
                   {isOver ? "放開以移動到這裡" : "沒有專案"}
                 </p>
               ) : (
-                columnProjects.map((project) => (
+                columnProjects.map((project, index) => (
                   <div
                     key={project.path}
                     draggable
                     onDragStart={() => handleDragStart(project.name)}
+                    onDragOver={(e) => handleDragOverCard(e, status, index, project.name)}
                     onDragEnd={handleDragEnd}
-                    className={`cursor-grab active:cursor-grabbing transition-opacity ${
-                      draggedProject === project.name ? "opacity-50" : ""
+                    className={`cursor-grab active:cursor-grabbing transition-all ${
+                      draggedProject === project.name ? "opacity-50 scale-95" : ""
+                    } ${
+                      isOver && dropIndex === index && draggedProject !== project.name
+                        ? "border-t-2 border-blue-400 pt-1"
+                        : ""
                     }`}
                   >
-                    <ProjectCard project={project} />
+                    <ProjectCard project={project} onUpdate={onUpdate} allGroups={allGroups} />
                   </div>
                 ))
               )}

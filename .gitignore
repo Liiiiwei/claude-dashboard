@@ -45,3 +45,4 @@ next-env.d.ts
 
 # 專案狀態設定檔（使用者個人資料）
 projects-config.json
+.gstack/
