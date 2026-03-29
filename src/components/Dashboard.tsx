@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { Project } from "@/lib/types";
+import type { Project, ProjectStatus } from "@/lib/types";
 import ProjectCard from "./ProjectCard";
 import FilterBar from "./FilterBar";
 import SkeletonCard from "./SkeletonCard";
+import KanbanBoard from "./KanbanBoard";
 
 export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -12,6 +13,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState("全部");
   const [sortBy, setSortBy] = useState<"lastModified" | "name">("lastModified");
+  const [view, setView] = useState<"list" | "kanban">("list");
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -34,6 +36,23 @@ export default function Dashboard() {
     fetchProjects();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleStatusChange = async (name: string, status: ProjectStatus) => {
+    try {
+      const res = await fetch("/api/projects", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, status }),
+      });
+      if (!res.ok) throw new Error("更新失敗");
+      // 更新本地狀態
+      setProjects((prev) =>
+        prev.map((p) => (p.name === name ? { ...p, status } : p))
+      );
+    } catch {
+      alert("狀態更新失敗");
+    }
+  };
 
   // 從所有專案中收集標籤（排除 Git）
   const allTags = Array.from(
@@ -83,6 +102,8 @@ export default function Dashboard() {
           onTagChange={setActiveTag}
           sortBy={sortBy}
           onSortChange={setSortBy}
+          view={view}
+          onViewChange={setView}
         />
       )}
 
@@ -102,11 +123,15 @@ export default function Dashboard() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {sorted.map((project) => (
-            <ProjectCard key={project.path} project={project} />
-          ))}
-        </div>
+        view === "kanban" ? (
+          <KanbanBoard projects={sorted} onStatusChange={handleStatusChange} />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {sorted.map((project) => (
+              <ProjectCard key={project.path} project={project} />
+            ))}
+          </div>
+        )
       )}
     </main>
   );
