@@ -49,24 +49,8 @@ export default function ProjectCard({ project }: Props) {
 
   return (
     <div className="bg-gray-900 rounded-lg p-4 border border-gray-800 hover:border-gray-700 transition-colors">
-      <div className="flex justify-between items-start mb-1">
-        <h3 className="font-bold text-base truncate mr-2">{project.name}</h3>
-        <div className="flex gap-1.5 shrink-0">
-          <button
-            onClick={() => handleOpen("finder")}
-            className="px-2 py-1 text-xs bg-gray-800 hover:bg-gray-700 rounded transition-colors"
-            title="在 Finder 中開啟"
-          >
-            📂
-          </button>
-          <button
-            onClick={() => handleOpen("vscode")}
-            className="px-2 py-1 text-xs bg-gray-800 hover:bg-gray-700 rounded transition-colors"
-            title="在 VS Code 中開啟"
-          >
-            ▶ Code
-          </button>
-        </div>
+      <div className="mb-2">
+        <h3 className="font-bold text-base break-words">{project.name}</h3>
       </div>
 
       {project.description && (
@@ -84,9 +68,26 @@ export default function ProjectCard({ project }: Props) {
         ))}
       </div>
 
-      <div className="text-xs text-gray-500 truncate">
+      <div className="text-xs text-gray-500 truncate mb-3">
         {timeAgo(project.lastModified)} 更新
         {project.lastCommit && <span> · {project.lastCommit}</span>}
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          onClick={() => handleOpen("finder")}
+          className="flex-1 px-3 py-2 text-sm bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors text-center"
+          title="在 Finder 中開啟"
+        >
+          📂 Finder
+        </button>
+        <button
+          onClick={() => handleOpen("vscode")}
+          className="flex-1 px-3 py-2 text-sm bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors text-center text-white"
+          title="在 VS Code 中開啟"
+        >
+          ▶ Code
+        </button>
       </div>
     </div>
   );
