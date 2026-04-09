@@ -1,0 +1,5 @@
+{
+  "assignments": {},
+  "portRange": { "min": 3010, "max": 3099 },
+  "autoAssign": true
+}

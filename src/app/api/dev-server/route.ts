@@ -1,9 +1,54 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import { access } from "fs/promises";
+import net from "net";
+import { detectServerForPath } from "@/lib/process-detect";
+import { getAssignedPort } from "@/lib/port-registry";
 
-// 追蹤執行中的 dev server
-const runningServers = new Map<string, { pid: number; port: number }>();
+export const dynamic = "force-dynamic";
+
+// 檢查 port 是否可用
+function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once("error", () => resolve(false));
+    server.once("listening", () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, "127.0.0.1");
+  });
+}
+
+// 用 lsof 找出佔用指定 port 的 PID 並終止
+function killProcessOnPort(port: number): void {
+  try {
+    const output = execSync(
+      `lsof -iTCP:${port} -sTCP:LISTEN -t 2>/dev/null || true`,
+      { encoding: "utf-8", timeout: 5000 },
+    );
+    const pids = output
+      .trim()
+      .split("\n")
+      .filter((line) => line.trim());
+
+    for (const pidStr of pids) {
+      const pid = parseInt(pidStr, 10);
+      if (!isNaN(pid)) {
+        try {
+          process.kill(-pid, "SIGTERM");
+        } catch {
+          try {
+            process.kill(pid, "SIGTERM");
+          } catch {
+            // process 可能已結束
+          }
+        }
+      }
+    }
+  } catch {
+    // lsof 失敗時靜默處理
+  }
+}
 
 export async function POST(request: NextRequest) {
   const { path, action } = await request.json();
@@ -15,16 +60,27 @@ export async function POST(request: NextRequest) {
   }
 
   if (action === "start") {
-    // 檢查是否已在執行
-    if (runningServers.has(path)) {
-      const server = runningServers.get(path)!;
-      return NextResponse.json({ running: true, port: server.port, pid: server.pid });
+    // 先用系統偵測檢查是否已在執行
+    const existing = detectServerForPath(path);
+    if (existing) {
+      return NextResponse.json({
+        running: true,
+        port: existing.port,
+        pid: existing.pid,
+      });
     }
 
-    // 找一個可用的 port（從 3010 開始避免衝突）
-    const port = 3010 + runningServers.size;
-
     try {
+      // 從 port registry 取得固定 port（若無分配會自動分配）
+      const port = await getAssignedPort(path);
+
+      // 檢查 assigned port 是否被其他 process 佔用
+      const available = await isPortAvailable(port);
+      if (!available) {
+        killProcessOnPort(port);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+
       const child = spawn("npm", ["run", "dev", "--", "-p", String(port)], {
         cwd: path,
         detached: true,
@@ -33,7 +89,8 @@ export async function POST(request: NextRequest) {
       child.unref();
 
       if (child.pid) {
-        runningServers.set(path, { pid: child.pid, port });
+        // 等待一下讓 server 啟動
+        await new Promise((resolve) => setTimeout(resolve, 2000));
         return NextResponse.json({ running: true, port, pid: child.pid });
       }
       return NextResponse.json({ error: "啟動失敗" }, { status: 500 });
@@ -44,27 +101,29 @@ export async function POST(request: NextRequest) {
   }
 
   if (action === "stop") {
-    const server = runningServers.get(path);
+    const server = detectServerForPath(path);
     if (server) {
       try {
-        process.kill(-server.pid);
+        process.kill(-server.pid, "SIGTERM");
       } catch {
-        // 程序可能已結束
+        try {
+          process.kill(server.pid, "SIGTERM");
+        } catch {
+          // process 可能已結束
+        }
       }
-      runningServers.delete(path);
     }
     return NextResponse.json({ running: false });
   }
 
   if (action === "status") {
-    const server = runningServers.get(path);
+    const server = detectServerForPath(path);
     if (server) {
-      try {
-        process.kill(server.pid, 0); // 檢查是否還活著
-        return NextResponse.json({ running: true, port: server.port, pid: server.pid });
-      } catch {
-        runningServers.delete(path);
-      }
+      return NextResponse.json({
+        running: true,
+        port: server.port,
+        pid: server.pid,
+      });
     }
     return NextResponse.json({ running: false });
   }
