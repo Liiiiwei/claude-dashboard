@@ -21,36 +21,32 @@ export default function Dashboard() {
   const [showCommitDialog, setShowCommitDialog] = useState(false);
   const [commitMsg, setCommitMsg] = useState("");
   const [committing, setCommitting] = useState(false);
-  const [tab, setTab] = useState<"projects" | "daily">(() => {
-    if (typeof window !== "undefined")
-      return (
-        (localStorage.getItem("dashboard-tab") as "projects" | "daily") ||
-        "projects"
-      );
-    return "projects";
-  });
-  const [activeTag, setActiveTag] = useState(() => {
-    if (typeof window !== "undefined")
-      return localStorage.getItem("dashboard-tag") || "全部";
-    return "全部";
-  });
+  const [tab, setTab] = useState<"projects" | "daily">("projects");
+  const [activeTag, setActiveTag] = useState("全部");
   const [activeGroup, setActiveGroup] = useState("全部");
-  const [sortBy, setSortBy] = useState<"lastModified" | "name">(() => {
-    if (typeof window !== "undefined")
-      return (
-        (localStorage.getItem("dashboard-sort") as "lastModified" | "name") ||
-        "lastModified"
-      );
-    return "lastModified";
-  });
-  const [view, setView] = useState<"list" | "kanban">(() => {
-    if (typeof window !== "undefined")
-      return (
-        (localStorage.getItem("dashboard-view") as "list" | "kanban") ||
-        "kanban"
-      );
-    return "kanban";
-  });
+  const [sortBy, setSortBy] = useState<"lastModified" | "name">("lastModified");
+  const [view, setView] = useState<"list" | "kanban">("kanban");
+
+  // 從 localStorage 恢復偏好（hydration 後）
+  useEffect(() => {
+    const savedTab = localStorage.getItem("dashboard-tab") as
+      | "projects"
+      | "daily"
+      | null;
+    const savedTag = localStorage.getItem("dashboard-tag");
+    const savedSort = localStorage.getItem("dashboard-sort") as
+      | "lastModified"
+      | "name"
+      | null;
+    const savedView = localStorage.getItem("dashboard-view") as
+      | "list"
+      | "kanban"
+      | null;
+    if (savedTab) setTab(savedTab);
+    if (savedTag) setActiveTag(savedTag);
+    if (savedSort) setSortBy(savedSort);
+    if (savedView) setView(savedView);
+  }, []);
 
   const [runningPorts, setRunningPorts] = useState<Record<string, number>>({});
   const [systemStats, setSystemStats] = useState<SystemStats | null>(null);

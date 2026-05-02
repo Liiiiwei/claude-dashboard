@@ -25,6 +25,7 @@ export default function PortManager() {
   const [killing, setKilling] = useState<number | null>(null);
   const [killingAll, setKillingAll] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const dedupInProgress = useRef(false);
 
   // 取得 port 資料
   const fetchPorts = useCallback(async () => {
@@ -104,6 +105,48 @@ export default function PortManager() {
     }
   };
 
+  // 自動清理重複 process（同一 projectPath 有多個 process，保留 port 最小的）
+  useEffect(() => {
+    if (!data?.ports || data.ports.length === 0) return;
+    if (dedupInProgress.current) return;
+
+    const byPath = new Map<string, PortInfo[]>();
+    for (const p of data.ports) {
+      if (!p.projectPath) continue;
+      const list = byPath.get(p.projectPath) || [];
+      list.push(p);
+      byPath.set(p.projectPath, list);
+    }
+
+    const toKill: number[] = [];
+    for (const [, list] of byPath) {
+      if (list.length <= 1) continue;
+      list.sort((a, b) => a.port - b.port);
+      for (let i = 1; i < list.length; i++) {
+        toKill.push(list[i].pid);
+      }
+    }
+
+    if (toKill.length === 0) return;
+
+    dedupInProgress.current = true;
+    (async () => {
+      for (const pid of toKill) {
+        try {
+          await fetch("/api/ports", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "kill", pid }),
+          });
+        } catch {
+          // 靜默處理
+        }
+      }
+      await fetchPorts();
+      dedupInProgress.current = false;
+    })();
+  }, [data?.ports, fetchPorts]);
+
   const runningPorts = data?.ports ?? [];
   const runningCount = runningPorts.length;
 
@@ -161,9 +204,15 @@ export default function PortManager() {
                   key={p.pid}
                   className="flex items-center gap-2 bg-white/40 border border-white/50 rounded-lg px-2.5 py-1.5 text-xs"
                 >
-                  <span className="font-mono font-semibold text-gray-800 w-12 shrink-0">
+                  <a
+                    href={`http://localhost:${p.port}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono font-semibold text-blue-600 hover:text-blue-800 hover:underline w-12 shrink-0"
+                    title={`開啟 http://localhost:${p.port}`}
+                  >
                     :{p.port}
-                  </span>
+                  </a>
                   <span
                     className="text-gray-600 truncate flex-1"
                     title={p.projectPath ?? undefined}

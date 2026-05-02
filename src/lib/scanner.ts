@@ -1,8 +1,12 @@
 import { readdir, stat, readFile, access } from "fs/promises";
 import { join } from "path";
-import { execSync } from "child_process";
+import { exec } from "child_process";
+import { promisify } from "util";
 import type { Project } from "./types";
-import { readConfig } from "./config";
+import { readConfig, getExcludePatterns } from "./config";
+
+// 將 exec 包裝成 Promise，避免阻塞 event loop
+const execAsync = promisify(exec);
 
 const SCAN_DIR =
   process.env.SCAN_DIR ||
@@ -24,7 +28,7 @@ async function detectTags(projectPath: string): Promise<string[]> {
   if (await exists("package.json")) {
     try {
       const pkg = JSON.parse(
-        await readFile(join(projectPath, "package.json"), "utf-8")
+        await readFile(join(projectPath, "package.json"), "utf-8"),
       );
       const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
       if (allDeps["next"]) {
@@ -44,7 +48,7 @@ async function detectTags(projectPath: string): Promise<string[]> {
   if (await exists("manifest.json")) {
     try {
       const manifest = JSON.parse(
-        await readFile(join(projectPath, "manifest.json"), "utf-8")
+        await readFile(join(projectPath, "manifest.json"), "utf-8"),
       );
       if (manifest.manifest_version) {
         tags.push("Chrome 擴充");
@@ -72,12 +76,12 @@ async function detectTags(projectPath: string): Promise<string[]> {
       f !== "package.json" &&
       f !== "manifest.json" &&
       f !== "appsscript.json" &&
-      f !== "tsconfig.json"
+      f !== "tsconfig.json",
   );
   for (const jsonFile of jsonFiles) {
     try {
       const content = JSON.parse(
-        await readFile(join(projectPath, jsonFile), "utf-8")
+        await readFile(join(projectPath, jsonFile), "utf-8"),
       );
       if (content.nodes && content.connections) {
         tags.push("n8n");
@@ -111,35 +115,57 @@ async function readDescription(projectPath: string): Promise<string> {
   return "";
 }
 
-function getLastCommit(projectPath: string): string | null {
+// 非同步取得最後 commit 訊息，避免阻塞
+async function getLastCommit(projectPath: string): Promise<string | null> {
   try {
-    const result = execSync('git log -1 --format="%s"', {
+    const { stdout } = await execAsync('git log -1 --format="%s"', {
       cwd: projectPath,
       timeout: 3000,
-      encoding: "utf-8",
     });
-    return result.trim().replace(/^"|"$/g, "") || null;
+    return stdout.trim().replace(/^"|"$/g, "") || null;
   } catch {
     return null;
   }
 }
 
-function getGitInfo(projectPath: string): { branch: string; dirty: number } | null {
+// 非同步取得 git branch、dirty 檔案數、remote URL、commit 總數，避免阻塞
+async function getGitInfo(projectPath: string): Promise<{
+  branch: string;
+  dirty: number;
+  remoteUrl: string | null;
+  totalCommits: number | null;
+} | null> {
   try {
-    const branch = execSync("git rev-parse --abbrev-ref HEAD", {
-      cwd: projectPath,
-      timeout: 3000,
-      encoding: "utf-8",
-    }).trim();
+    const [branchResult, statusResult, remoteResult, commitCountResult] =
+      await Promise.all([
+        execAsync("git rev-parse --abbrev-ref HEAD", {
+          cwd: projectPath,
+          timeout: 3000,
+        }),
+        execAsync("git status --porcelain", {
+          cwd: projectPath,
+          timeout: 3000,
+        }),
+        execAsync("git remote get-url origin", {
+          cwd: projectPath,
+          timeout: 3000,
+        }).catch(() => ({ stdout: "" })),
+        execAsync("git rev-list --count HEAD", {
+          cwd: projectPath,
+          timeout: 3000,
+        }).catch(() => ({ stdout: "" })),
+      ]);
 
-    const status = execSync("git status --porcelain", {
-      cwd: projectPath,
-      timeout: 3000,
-      encoding: "utf-8",
-    });
-    const dirty = status.trim() ? status.trim().split("\n").length : 0;
+    const branch = branchResult.stdout.trim();
+    const dirty = statusResult.stdout.trim()
+      ? statusResult.stdout.trim().split("\n").length
+      : 0;
+    const remoteUrl = remoteResult.stdout.trim() || null;
+    const totalCommits = commitCountResult.stdout.trim()
+      ? parseInt(commitCountResult.stdout.trim(), 10)
+      : null;
 
-    return { branch, dirty };
+    return { branch, dirty, remoteUrl, totalCommits };
   } catch {
     return null;
   }
@@ -148,7 +174,7 @@ function getGitInfo(projectPath: string): { branch: string; dirty: number } | nu
 async function checkDevScript(projectPath: string): Promise<boolean> {
   try {
     const pkg = JSON.parse(
-      await readFile(join(projectPath, "package.json"), "utf-8")
+      await readFile(join(projectPath, "package.json"), "utf-8"),
     );
     return !!pkg.scripts?.dev;
   } catch {
@@ -156,43 +182,88 @@ async function checkDevScript(projectPath: string): Promise<boolean> {
   }
 }
 
+async function readPackageInfo(
+  projectPath: string,
+): Promise<{ scripts: string[]; depsCount: number | null }> {
+  try {
+    const pkg = JSON.parse(
+      await readFile(join(projectPath, "package.json"), "utf-8"),
+    );
+    const scripts = pkg.scripts ? Object.keys(pkg.scripts) : [];
+    const deps = Object.keys(pkg.dependencies || {}).length;
+    const devDeps = Object.keys(pkg.devDependencies || {}).length;
+    return { scripts, depsCount: deps + devDeps };
+  } catch {
+    return { scripts: [], depsCount: null };
+  }
+}
+
+function matchesPattern(name: string, pattern: string): boolean {
+  if (pattern.includes("*")) {
+    const regex = new RegExp(
+      "^" + pattern.replace(/\*/g, ".*").replace(/\?/g, ".") + "$",
+    );
+    return regex.test(name);
+  }
+  return name === pattern;
+}
+
 export async function scanProjects(): Promise<Project[]> {
   const entries = await readdir(SCAN_DIR, { withFileTypes: true });
   const config = await readConfig();
-  const projects: Project[] = [];
+  const excludePatterns = await getExcludePatterns();
 
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const projectPath = join(SCAN_DIR, entry.name);
-    const projectStat = await stat(projectPath);
+  // 排除符合 pattern 的資料夾
+  const filtered = entries.filter(
+    (entry) =>
+      entry.isDirectory() &&
+      !excludePatterns.some((p) => matchesPattern(entry.name, p)),
+  );
 
-    const [tags, description, hasDevScript] = await Promise.all([
-      detectTags(projectPath),
-      readDescription(projectPath),
-      checkDevScript(projectPath),
-    ]);
+  // 所有專案並行處理，避免序列等待
+  const projects = await Promise.all(
+    filtered.map(async (entry) => {
+      const projectPath = join(SCAN_DIR, entry.name);
+      const projectStat = await stat(projectPath);
 
-    const gitInfo = tags.includes("Git") ? getGitInfo(projectPath) : null;
+      const [tags, description, hasDevScript, pkgInfo] = await Promise.all([
+        detectTags(projectPath),
+        readDescription(projectPath),
+        checkDevScript(projectPath),
+        readPackageInfo(projectPath),
+      ]);
 
-    projects.push({
-      name: entry.name,
-      description,
-      path: projectPath,
-      tags,
-      lastModified: projectStat.mtime.toISOString(),
-      lastCommit: tags.includes("Git") ? getLastCommit(projectPath) : null,
-      status: config[entry.name]?.status || "待辦",
-      note: config[entry.name]?.note || "",
-      group: config[entry.name]?.group || "",
-      git: gitInfo,
-      hasDevScript,
-      priority: config[entry.name]?.priority ?? 999,
-    });
-  }
+      // git 資訊也並行取得
+      const [gitInfo, lastCommit] = await Promise.all([
+        tags.includes("Git") ? getGitInfo(projectPath) : Promise.resolve(null),
+        tags.includes("Git")
+          ? getLastCommit(projectPath)
+          : Promise.resolve(null),
+      ]);
+
+      return {
+        name: entry.name,
+        description,
+        path: projectPath,
+        tags,
+        lastModified: projectStat.mtime.toISOString(),
+        lastCommit,
+        status: config[entry.name]?.status || "待辦",
+        note: config[entry.name]?.note || "",
+        group: config[entry.name]?.group || "",
+        git: gitInfo,
+        hasDevScript,
+        priority: config[entry.name]?.priority ?? 999,
+        pinned: !!config[entry.name]?.pinned,
+        scripts: pkgInfo.scripts,
+        depsCount: pkgInfo.depsCount,
+      } satisfies Project;
+    }),
+  );
 
   projects.sort(
     (a, b) =>
-      new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime()
+      new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime(),
   );
 
   return projects;

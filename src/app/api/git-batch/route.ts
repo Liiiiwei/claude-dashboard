@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { execSync } from "child_process";
+import { spawnSync } from "child_process";
 import { scanProjects } from "@/lib/scanner";
 
 export async function POST(request: NextRequest) {
@@ -21,16 +21,27 @@ export async function POST(request: NextRequest) {
 
     for (const project of dirtyProjects) {
       try {
-        execSync("git add -A", {
+        // 用 spawnSync 避免 shell 跳脫問題
+        const add = spawnSync("git", ["add", "-A"], {
           cwd: project.path,
           timeout: 5000,
           encoding: "utf-8",
         });
-        execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, {
+        if (add.status !== 0) {
+          results.push({ name: project.name, success: false, error: add.stderr || "git add 失敗" });
+          continue;
+        }
+
+        const commit = spawnSync("git", ["commit", "-m", message.trim()], {
           cwd: project.path,
           timeout: 10000,
           encoding: "utf-8",
         });
+        if (commit.status !== 0) {
+          results.push({ name: project.name, success: false, error: commit.stderr || "git commit 失敗" });
+          continue;
+        }
+
         results.push({ name: project.name, success: true });
       } catch (err) {
         results.push({

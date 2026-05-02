@@ -5,6 +5,8 @@ export const PROJECT_STATUSES: ProjectStatus[] = ["待辦", "進行中", "已完
 export interface GitInfo {
   branch: string;
   dirty: number; // 未提交的檔案數
+  remoteUrl: string | null; // git remote origin URL
+  totalCommits: number | null;
 }
 
 export interface Project {
@@ -20,16 +22,9 @@ export interface Project {
   git: GitInfo | null;
   hasDevScript: boolean; // 有沒有 npm run dev
   priority: number; // 欄位內排序
-}
-
-// 日常任務
-export type TaskStatus = "待辦" | "進行中" | "已完成";
-
-export interface DailyTask {
-  id: string;
-  text: string;
-  status: TaskStatus;
-  createdAt: string;
+  pinned: boolean; // 常用專案釘選
+  scripts: string[]; // package.json 中的 scripts
+  depsCount: number | null; // 相依套件數量
 }
 
 export const TAG_LABELS = [

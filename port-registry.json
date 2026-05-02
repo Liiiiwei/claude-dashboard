@@ -1,5 +1,10 @@
 {
-  "assignments": {},
-  "portRange": { "min": 3010, "max": 3099 },
+  "assignments": {
+    "/Users/vincentsia/Desktop/vibe-coding playground/ad-manager-pro": 3010
+  },
+  "portRange": {
+    "min": 3010,
+    "max": 3099
+  },
   "autoAssign": true
 }
