@@ -8,6 +8,7 @@ interface ProjectConfigEntry {
   group?: string;
   priority?: number; // 欄位內排序，數字越小越前面
   pinned?: boolean;
+  pinOrder?: number; // 釘選列順序，數字越小越前面
 }
 
 interface SettingsEntry {
@@ -121,6 +122,20 @@ export async function setProjectPinned(
     status: (config[name] as ProjectConfigEntry)?.status || "待辦",
     pinned,
   };
+  await writeConfig(config);
+}
+
+export async function batchUpdatePinOrder(
+  updates: { name: string; pinOrder: number }[],
+): Promise<void> {
+  const config = await readConfig();
+  for (const { name, pinOrder } of updates) {
+    config[name] = {
+      ...config[name],
+      status: (config[name] as ProjectConfigEntry)?.status || "待辦",
+      pinOrder,
+    };
+  }
   await writeConfig(config);
 }
 

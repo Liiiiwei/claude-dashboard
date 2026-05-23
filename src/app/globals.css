@@ -5,7 +5,14 @@
 
 /* Liquid Glass 背景 */
 body {
-  background: linear-gradient(135deg, #e8ecf4 0%, #f0e6f6 25%, #e6f0fa 50%, #f6efe6 75%, #e8ecf4 100%);
+  background: linear-gradient(
+    135deg,
+    #e8ecf4 0%,
+    #f0e6f6 25%,
+    #e6f0fa 50%,
+    #f6efe6 75%,
+    #e8ecf4 100%
+  );
   background-attachment: fixed;
   min-height: 100vh;
 }
@@ -18,7 +25,11 @@ body::before {
   right: -10%;
   width: 600px;
   height: 600px;
-  background: radial-gradient(circle, rgba(147, 130, 255, 0.15) 0%, transparent 70%);
+  background: radial-gradient(
+    circle,
+    rgba(147, 130, 255, 0.15) 0%,
+    transparent 70%
+  );
   pointer-events: none;
   z-index: 0;
 }
@@ -30,7 +41,11 @@ body::after {
   left: -10%;
   width: 500px;
   height: 500px;
-  background: radial-gradient(circle, rgba(100, 200, 255, 0.12) 0%, transparent 70%);
+  background: radial-gradient(
+    circle,
+    rgba(100, 200, 255, 0.12) 0%,
+    transparent 70%
+  );
   pointer-events: none;
   z-index: 0;
 }
@@ -73,12 +88,28 @@ body::after {
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.5);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
-  transition: all 0.15s ease;
+  transition:
+    transform 0.08s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+  cursor: pointer;
 }
 
 .glass-button:hover {
   background: rgba(255, 255, 255, 0.6);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.glass-button:active:not(:disabled) {
+  transform: scale(0.96);
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.08),
+    inset 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.glass-button:disabled {
+  cursor: not-allowed;
 }
 
 .glass-button-active {
@@ -92,7 +123,11 @@ body::after {
 }
 
 .glass-blue {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.65) 0%, rgba(99, 102, 241, 0.55) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.65) 0%,
+    rgba(99, 102, 241, 0.55) 100%
+  );
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.25);
@@ -104,14 +139,22 @@ body::after {
 }
 
 .glass-blue:hover {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.8) 0%, rgba(99, 102, 241, 0.7) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.8) 0%,
+    rgba(99, 102, 241, 0.7) 100%
+  );
   box-shadow:
     0 4px 16px rgba(59, 130, 246, 0.2),
     inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 .glass-green {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.65) 0%, rgba(16, 185, 129, 0.55) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(34, 197, 94, 0.65) 0%,
+    rgba(16, 185, 129, 0.55) 100%
+  );
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.25);
@@ -123,11 +166,19 @@ body::after {
 }
 
 .glass-green:hover {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.8) 0%, rgba(16, 185, 129, 0.7) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(34, 197, 94, 0.8) 0%,
+    rgba(16, 185, 129, 0.7) 100%
+  );
 }
 
 .glass-amber {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.7) 0%, rgba(234, 88, 12, 0.55) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(245, 158, 11, 0.7) 0%,
+    rgba(234, 88, 12, 0.55) 100%
+  );
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.25);
@@ -139,7 +190,11 @@ body::after {
 }
 
 .glass-amber:hover {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.85) 0%, rgba(234, 88, 12, 0.7) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(245, 158, 11, 0.85) 0%,
+    rgba(234, 88, 12, 0.7) 100%
+  );
 }
 
 .glass-accent {
@@ -149,10 +204,42 @@ body::after {
   border: 1px solid rgba(59, 130, 246, 0.2);
 }
 
+/* Claude 品牌色：暖珊瑚橘 #D97757 */
+.glass-claude {
+  background: linear-gradient(
+    135deg,
+    rgba(217, 119, 87, 0.75) 0%,
+    rgba(194, 96, 65, 0.6) 100%
+  );
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow:
+    0 2px 12px rgba(217, 119, 87, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  color: white;
+  transition: all 0.15s ease;
+}
+
+.glass-claude:hover {
+  background: linear-gradient(
+    135deg,
+    rgba(217, 119, 87, 0.9) 0%,
+    rgba(194, 96, 65, 0.75) 100%
+  );
+  box-shadow:
+    0 4px 16px rgba(217, 119, 87, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
 /* Skeleton shimmer */
 @keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
 }
 
 .glass-shimmer {

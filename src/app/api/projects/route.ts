@@ -79,6 +79,10 @@ export async function PATCH(request: NextRequest) {
     } else if (field === "pinned") {
       const { setProjectPinned } = await import("@/lib/config");
       await setProjectPinned(name, !!value);
+    } else if (field === "pinOrder") {
+      // 批次更新釘選列順序：value 是 { name: string; pinOrder: number }[]
+      const { batchUpdatePinOrder } = await import("@/lib/config");
+      await batchUpdatePinOrder(value);
     } else if (field === "exclude") {
       const { addExcludePattern } = await import("@/lib/config");
       await addExcludePattern(value);

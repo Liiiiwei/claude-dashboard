@@ -4,16 +4,60 @@ import React, { useState, useRef, useCallback } from "react";
 import type { Project, ProjectStatus } from "@/lib/types";
 import ProjectCard from "./ProjectCard";
 
-const COLUMNS: { status: ProjectStatus; color: string }[] = [
-  { status: "待辦", color: "border-gray-400" },
-  { status: "進行中", color: "border-blue-400" },
-  { status: "已完成", color: "border-green-400" },
-  { status: "暫停", color: "border-amber-400" },
+interface ColumnTheme {
+  dot: string; // 圓點背景色
+  text: string; // 標題文字色
+  badge: string; // 計數徽章背景
+  tint: string; // 欄位整體淡色底
+  overTint: string; // hover 時的色底
+}
+
+const COLUMNS: { status: ProjectStatus; theme: ColumnTheme }[] = [
+  {
+    status: "待辦",
+    theme: {
+      dot: "bg-gray-400",
+      text: "text-gray-600",
+      badge: "bg-gray-100/70 text-gray-600",
+      tint: "bg-gray-50/40",
+      overTint: "bg-gray-100/60",
+    },
+  },
+  {
+    status: "進行中",
+    theme: {
+      dot: "bg-blue-400",
+      text: "text-blue-700",
+      badge: "bg-blue-100/70 text-blue-700",
+      tint: "bg-blue-50/40",
+      overTint: "bg-blue-100/50",
+    },
+  },
+  {
+    status: "已完成",
+    theme: {
+      dot: "bg-green-400",
+      text: "text-green-700",
+      badge: "bg-green-100/70 text-green-700",
+      tint: "bg-green-50/40",
+      overTint: "bg-green-100/50",
+    },
+  },
+  {
+    status: "暫停",
+    theme: {
+      dot: "bg-amber-400",
+      text: "text-amber-700",
+      badge: "bg-amber-100/70 text-amber-700",
+      tint: "bg-amber-50/40",
+      overTint: "bg-amber-100/50",
+    },
+  },
 ];
 
 interface KanbanColumnProps {
   status: ProjectStatus;
-  color: string;
+  theme: ColumnTheme;
   projects: Project[];
   isOver: boolean;
   dropIndex: number | null;
@@ -38,7 +82,7 @@ interface KanbanColumnProps {
 // 獨立的欄位元件，用 React.memo 避免其他欄位更新時重繪
 const KanbanColumn = React.memo(function KanbanColumn({
   status,
-  color,
+  theme,
   projects,
   isOver,
   dropIndex,
@@ -59,20 +103,25 @@ const KanbanColumn = React.memo(function KanbanColumn({
       onDragOver={(e) => onDragOverColumn(e, status)}
       onDragLeave={onDragLeave}
       onDrop={(e) => onDrop(e, status)}
-      className={`border-t-2 ${color} rounded-2xl p-4 min-h-[200px] transition-colors ${
-        isOver ? "bg-white/50 backdrop-blur-md" : "bg-white/20 backdrop-blur-sm"
+      className={`rounded-xl p-3 min-h-[200px] transition-colors backdrop-blur-sm ${
+        isOver ? theme.overTint : theme.tint
       }`}
     >
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-gray-700">{status}</h3>
-        <span className="text-xs text-gray-500 bg-white/50 px-2 py-0.5 rounded-full border border-white/60">
+      <div className="flex items-center justify-between mb-3 px-1">
+        <div className="flex items-center gap-2">
+          <span className={`w-1.5 h-1.5 rounded-full ${theme.dot}`} />
+          <h3 className={`font-semibold text-sm ${theme.text}`}>{status}</h3>
+        </div>
+        <span
+          className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${theme.badge}`}
+        >
           {projects.length}
         </span>
       </div>
-      <div className="space-y-4">
+      <div className="space-y-2.5">
         {projects.length === 0 ? (
           <p
-            className={`text-sm text-center py-10 transition-colors ${
+            className={`text-xs text-center py-8 transition-colors ${
               isOver ? "text-gray-600" : "text-gray-400"
             }`}
           >
@@ -90,7 +139,7 @@ const KanbanColumn = React.memo(function KanbanColumn({
                 draggedProject === project.name ? "opacity-50 scale-95" : ""
               } ${
                 isOver && dropIndex === index && draggedProject !== project.name
-                  ? "border-t-2 border-blue-400 pt-1"
+                  ? "ring-2 ring-blue-400/50 rounded-xl"
                   : ""
               }`}
             >
@@ -236,8 +285,8 @@ export default function KanbanBoard({
   }, []);
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-      {COLUMNS.map(({ status, color }) => {
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+      {COLUMNS.map(({ status, theme }) => {
         const columnProjects = projects
           .filter((p) => p.status === status)
           .sort((a, b) => a.priority - b.priority);
@@ -247,7 +296,7 @@ export default function KanbanBoard({
           <KanbanColumn
             key={status}
             status={status}
-            color={color}
+            theme={theme}
             projects={columnProjects}
             isOver={isOver}
             dropIndex={dropIndex}

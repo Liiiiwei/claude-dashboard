@@ -175,7 +175,13 @@ export default function Dashboard() {
   );
 
   const pinnedProjects = useMemo(
-    () => projects.filter((p) => p.pinned),
+    () =>
+      projects
+        .filter((p) => p.pinned)
+        .sort((a, b) => {
+          if (a.pinOrder !== b.pinOrder) return a.pinOrder - b.pinOrder;
+          return a.name.localeCompare(b.name);
+        }),
     [projects],
   );
 
@@ -191,6 +197,30 @@ export default function Dashboard() {
       );
     } catch {
       alert("取消釘選失敗");
+    }
+  }, []);
+
+  // 拖移釘選列重新排序：optimistic 更新 + PATCH 寫回
+  const handleReorderPinned = useCallback(async (orderedNames: string[]) => {
+    const updates = orderedNames.map((name, idx) => ({ name, pinOrder: idx }));
+    setProjects((prev) =>
+      prev.map((p) => {
+        const idx = orderedNames.indexOf(p.name);
+        return idx >= 0 ? { ...p, pinOrder: idx } : p;
+      }),
+    );
+    try {
+      await fetch("/api/projects", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "_batch",
+          field: "pinOrder",
+          value: updates,
+        }),
+      });
+    } catch {
+      alert("儲存順序失敗");
     }
   }, []);
 
@@ -298,13 +328,19 @@ export default function Dashboard() {
               {systemStats.mem.used}/{systemStats.mem.total}GB
             </span>
           </div>
-          <PortManager />
         </div>
       )}
 
+      {/* Port 管理 */}
+      <PortManager />
+
       {/* 釘選列 */}
       {pinnedProjects.length > 0 && (
-        <PinnedBar projects={pinnedProjects} onUnpin={handleUnpin} />
+        <PinnedBar
+          projects={pinnedProjects}
+          onUnpin={handleUnpin}
+          onReorder={handleReorderPinned}
+        />
       )}
 
       {/* 分頁切換 */}
@@ -381,7 +417,7 @@ export default function Dashboard() {
 
       {tab === "projects" &&
         (loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <SkeletonCard key={i} />
             ))}
@@ -405,7 +441,7 @@ export default function Dashboard() {
             onDevServerStarted={handleDevServerStarted}
           />
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {sorted.map((project) => (
               <ProjectCard
                 key={project.path}

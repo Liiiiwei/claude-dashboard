@@ -255,6 +255,7 @@ export async function scanProjects(): Promise<Project[]> {
         hasDevScript,
         priority: config[entry.name]?.priority ?? 999,
         pinned: !!config[entry.name]?.pinned,
+        pinOrder: config[entry.name]?.pinOrder ?? 999,
         scripts: pkgInfo.scripts,
         depsCount: pkgInfo.depsCount,
       } satisfies Project;

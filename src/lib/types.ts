@@ -1,6 +1,11 @@
 export type ProjectStatus = "待辦" | "進行中" | "已完成" | "暫停";
 
-export const PROJECT_STATUSES: ProjectStatus[] = ["待辦", "進行中", "已完成", "暫停"];
+export const PROJECT_STATUSES: ProjectStatus[] = [
+  "待辦",
+  "進行中",
+  "已完成",
+  "暫停",
+];
 
 export interface GitInfo {
   branch: string;
@@ -23,6 +28,7 @@ export interface Project {
   hasDevScript: boolean; // 有沒有 npm run dev
   priority: number; // 欄位內排序
   pinned: boolean; // 常用專案釘選
+  pinOrder: number; // 釘選列順序，數字越小越前面
   scripts: string[]; // package.json 中的 scripts
   depsCount: number | null; // 相依套件數量
 }

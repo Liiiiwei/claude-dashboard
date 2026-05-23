@@ -53,14 +53,17 @@ function ProjectCard({
   runningPort = null,
   onDevServerStarted,
 }: Props) {
-  const [editingNote, setEditingNote] = useState(false);
-  const [noteText, setNoteText] = useState(project.note);
   const [devPort, setDevPort] = useState<number | null>(runningPort);
   const [devLoading, setDevLoading] = useState(false);
+  const [openLoading, setOpenLoading] = useState<"finder" | "cmux" | null>(
+    null,
+  );
   const [showGroupPicker, setShowGroupPicker] = useState(false);
   const [customGroup, setCustomGroup] = useState("");
 
-  const handleOpen = async (action: "finder" | "vscode") => {
+  const handleOpen = async (action: "finder" | "cmux") => {
+    if (openLoading) return;
+    setOpenLoading(action);
     try {
       const res = await fetch("/api/open", {
         method: "POST",
@@ -73,24 +76,8 @@ function ProjectCard({
       }
     } catch {
       alert("無法連線到伺服器");
-    }
-  };
-
-  const saveNote = async () => {
-    try {
-      await fetch("/api/projects", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: project.name,
-          field: "note",
-          value: noteText,
-        }),
-      });
-      setEditingNote(false);
-      onUpdate?.();
-    } catch {
-      alert("儲存備註失敗");
+    } finally {
+      setOpenLoading(null);
     }
   };
 
@@ -174,19 +161,19 @@ function ProjectCard({
   };
 
   return (
-    <div className="glass-card rounded-2xl p-4">
+    <div className="glass-card rounded-xl p-2.5">
       {/* 標題列 + 活躍度 */}
-      <div className="flex items-start gap-2 mb-2">
+      <div className="flex items-start gap-1.5 mb-1">
         <span
-          className={`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 ${activityColor(project.lastModified)}`}
+          className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${activityColor(project.lastModified)}`}
           title="活躍度"
         />
-        <h3 className="font-bold text-base break-words flex-1 text-gray-800">
+        <h3 className="font-semibold text-sm break-words flex-1 text-gray-800 leading-tight">
           {project.name}
         </h3>
         <button
           onClick={handlePin}
-          className={`shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs transition-colors ${
+          className={`shrink-0 w-5 h-5 flex items-center justify-center rounded text-xs transition-colors ${
             project.pinned
               ? "text-amber-500 bg-amber-100/60"
               : "text-gray-400 hover:text-gray-600"
@@ -197,7 +184,7 @@ function ProjectCard({
         </button>
         <button
           onClick={handleHide}
-          className="shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs text-gray-400 hover:text-red-500 transition-colors"
+          className="shrink-0 w-5 h-5 flex items-center justify-center rounded text-[10px] text-gray-400 hover:text-red-500 transition-colors"
           title="隱藏此專案"
         >
           ✕
@@ -206,30 +193,30 @@ function ProjectCard({
 
       {/* 描述 */}
       {project.description && (
-        <p className="text-sm text-gray-500 mb-2 truncate">
+        <p className="text-xs text-gray-500 mb-1.5 truncate">
           {project.description}
         </p>
       )}
 
       {/* Git 狀態 */}
       {project.git && (
-        <div className="flex items-center gap-2 text-xs mb-2">
-          <span className="text-gray-500 bg-white/40 px-2 py-0.5 rounded border border-white/50">
+        <div className="flex items-center gap-1.5 text-[11px] mb-1.5">
+          <span className="text-gray-500 bg-white/40 px-1.5 py-0.5 rounded border border-white/50">
             ⎇ {project.git.branch}
           </span>
           {project.git.dirty > 0 && (
-            <span className="text-amber-700 bg-amber-100/60 px-2 py-0.5 rounded border border-amber-200/50">
-              {project.git.dirty} 個未提交
+            <span className="text-amber-700 bg-amber-100/60 px-1.5 py-0.5 rounded border border-amber-200/50">
+              {project.git.dirty} 未提交
             </span>
           )}
         </div>
       )}
 
       {/* 分組 + 標籤 */}
-      <div className="flex flex-wrap gap-1.5 mb-2 relative">
+      <div className="flex flex-wrap gap-1 mb-1.5 relative">
         <button
           onClick={() => setShowGroupPicker(!showGroupPicker)}
-          className={`px-2 py-0.5 text-xs rounded-full transition-colors ${
+          className={`px-1.5 py-0.5 text-[11px] rounded-full transition-colors ${
             project.group
               ? "glass-accent text-indigo-600 font-medium"
               : "glass-button text-gray-400 border border-dashed border-gray-300/60"
@@ -283,84 +270,49 @@ function ProjectCard({
         {project.tags.map((tag) => (
           <span
             key={tag}
-            className={`px-2 py-0.5 text-xs rounded-full ${TAG_COLORS[tag] || "bg-gray-500/15 text-gray-600 border border-gray-300/40"}`}
+            className={`px-1.5 py-0.5 text-[11px] rounded-full ${TAG_COLORS[tag] || "bg-gray-500/15 text-gray-600 border border-gray-300/40"}`}
           >
             {tag}
           </span>
         ))}
       </div>
 
-      {/* 備註 */}
-      {editingNote ? (
-        <div className="mb-2">
-          <textarea
-            value={noteText}
-            onChange={(e) => setNoteText(e.target.value)}
-            className="w-full bg-white/40 text-gray-700 text-xs rounded-lg p-2 border border-white/50 resize-none focus:outline-none focus:border-blue-400 placeholder:text-gray-400"
-            rows={2}
-            placeholder="備註..."
-            autoFocus
-          />
-          <div className="flex gap-1 mt-1">
-            <button
-              onClick={saveNote}
-              className="text-xs glass-blue px-2.5 py-1 rounded-lg"
-            >
-              儲存
-            </button>
-            <button
-              onClick={() => {
-                setEditingNote(false);
-                setNoteText(project.note);
-              }}
-              className="text-xs glass-button px-2.5 py-1 rounded-lg text-gray-600"
-            >
-              取消
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button
-          onClick={() => setEditingNote(true)}
-          className="w-full text-left text-xs text-gray-400 hover:text-gray-600 mb-2 truncate transition-colors"
-        >
-          {project.note || "+ 新增備註"}
-        </button>
-      )}
-
       {/* 時間資訊 */}
-      <div className="text-xs text-gray-400 truncate mb-3">
+      <div className="text-[11px] text-gray-400 truncate mb-2">
         {timeAgo(project.lastModified)} 更新
         {project.lastCommit && <span> · {project.lastCommit}</span>}
       </div>
 
       {/* 操作按鈕 */}
-      <div className="flex gap-2">
+      <div className="flex gap-1.5">
         <button
           onClick={() => handleOpen("finder")}
-          className="flex-1 px-3 py-2 text-sm glass-button rounded-xl text-center text-gray-600"
+          disabled={openLoading !== null}
+          className="flex-1 px-2 py-1.5 text-xs glass-button rounded-lg text-center text-gray-600 disabled:opacity-60"
           title="在 Finder 中開啟"
         >
-          Finder
+          {openLoading === "finder" ? "開啟中…" : "Finder"}
         </button>
         <button
-          onClick={() => handleOpen("vscode")}
-          className="flex-1 px-3 py-2 text-sm glass-blue rounded-xl text-center"
-          title="在 Antigravity 中開啟"
+          onClick={() => handleOpen("cmux")}
+          disabled={openLoading !== null}
+          className="flex-1 px-2 py-1.5 text-xs glass-button rounded-lg text-center font-medium disabled:opacity-60"
+          style={{ color: "#C26041" }}
+          title="在 cmux 中啟動 Claude Code"
         >
-          Antigravity
+          {openLoading === "cmux" ? "啟動中…" : "Claude Code"}
         </button>
       </div>
 
       {/* Dev Server 按鈕 */}
       {project.hasDevScript && (
-        <div className="mt-2">
+        <div className="mt-1.5">
           {devPort ? (
             <a
               href={`http://localhost:${devPort}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="block text-center px-3 py-2 text-sm glass-green rounded-xl"
+              className="block text-center px-2 py-1.5 text-xs glass-green rounded-lg"
             >
               localhost:{devPort}
             </a>
@@ -368,9 +320,9 @@ function ProjectCard({
             <button
               onClick={startDevServer}
               disabled={devLoading}
-              className="w-full px-3 py-2 text-sm glass-button rounded-xl text-gray-600 disabled:opacity-50"
+              className="w-full px-2 py-1.5 text-xs glass-button rounded-lg text-gray-600 disabled:opacity-50"
             >
-              {devLoading ? "啟動中..." : "啟動 Dev Server"}
+              {devLoading ? "啟動中..." : "啟動 Dev"}
             </button>
           )}
         </div>
