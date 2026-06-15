@@ -3,6 +3,7 @@ import { execFileSync } from "child_process";
 import { access, readFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
+import { checkOrigin, isPathAllowed } from "@/lib/api-guard";
 
 const CMUX_BIN = "/Applications/cmux.app/Contents/Resources/bin/cmux";
 const CMUX_PASSWORD_FILE = join(homedir(), ".cmux-password");
@@ -35,7 +36,15 @@ async function waitForCmux(password: string): Promise<boolean> {
 }
 
 export async function POST(request: NextRequest) {
+  const denied = checkOrigin(request);
+  if (denied) return denied;
+
   const { path, action } = await request.json();
+
+  // 限制只能操作掃描目錄內的路徑，避免被誘導對任意路徑執行 open
+  if (!isPathAllowed(path)) {
+    return NextResponse.json({ error: "路徑不在允許範圍內" }, { status: 400 });
+  }
 
   try {
     await access(path);

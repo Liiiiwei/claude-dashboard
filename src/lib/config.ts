@@ -1,6 +1,10 @@
-import { readFile, writeFile } from "fs/promises";
+import { readFile } from "fs/promises";
 import { join } from "path";
 import type { ProjectStatus } from "./types";
+import { writeJsonAtomic, withLock } from "./json-store";
+
+// 序列化所有 config 寫入，避免並發的「讀-改-寫」互相覆蓋
+const LOCK_KEY = "projects-config";
 
 interface ProjectConfigEntry {
   status: ProjectStatus;
@@ -45,7 +49,7 @@ export async function readConfig(): Promise<ProjectsConfig> {
 }
 
 export async function writeConfig(config: ProjectsConfig): Promise<void> {
-  await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+  await writeJsonAtomic(CONFIG_PATH, config);
   // 寫入後同步更新快取，保持一致性
   configCache = config;
 }
@@ -54,89 +58,103 @@ export async function setProjectStatus(
   name: string,
   status: ProjectStatus,
 ): Promise<void> {
-  const config = await readConfig();
-  config[name] = { ...config[name], status };
-  await writeConfig(config);
+  await withLock(LOCK_KEY, async () => {
+    const config = await readConfig();
+    config[name] = { ...config[name], status };
+    await writeConfig(config);
+  });
 }
 
 export async function setProjectNote(
   name: string,
   note: string,
 ): Promise<void> {
-  const config = await readConfig();
-  config[name] = {
-    ...config[name],
-    status: config[name]?.status || "待辦",
-    note,
-  };
-  await writeConfig(config);
+  await withLock(LOCK_KEY, async () => {
+    const config = await readConfig();
+    config[name] = {
+      ...config[name],
+      status: config[name]?.status || "待辦",
+      note,
+    };
+    await writeConfig(config);
+  });
 }
 
 export async function setProjectGroup(
   name: string,
   group: string,
 ): Promise<void> {
-  const config = await readConfig();
-  config[name] = {
-    ...config[name],
-    status: config[name]?.status || "待辦",
-    group,
-  };
-  await writeConfig(config);
+  await withLock(LOCK_KEY, async () => {
+    const config = await readConfig();
+    config[name] = {
+      ...config[name],
+      status: config[name]?.status || "待辦",
+      group,
+    };
+    await writeConfig(config);
+  });
 }
 
 export async function setProjectPriority(
   name: string,
   priority: number,
 ): Promise<void> {
-  const config = await readConfig();
-  config[name] = {
-    ...config[name],
-    status: config[name]?.status || "待辦",
-    priority,
-  };
-  await writeConfig(config);
-}
-
-export async function batchUpdatePriority(
-  updates: { name: string; priority: number }[],
-): Promise<void> {
-  const config = await readConfig();
-  for (const { name, priority } of updates) {
+  await withLock(LOCK_KEY, async () => {
+    const config = await readConfig();
     config[name] = {
       ...config[name],
       status: config[name]?.status || "待辦",
       priority,
     };
-  }
-  await writeConfig(config);
+    await writeConfig(config);
+  });
+}
+
+export async function batchUpdatePriority(
+  updates: { name: string; priority: number }[],
+): Promise<void> {
+  await withLock(LOCK_KEY, async () => {
+    const config = await readConfig();
+    for (const { name, priority } of updates) {
+      config[name] = {
+        ...config[name],
+        status: config[name]?.status || "待辦",
+        priority,
+      };
+    }
+    await writeConfig(config);
+  });
 }
 
 export async function setProjectPinned(
   name: string,
   pinned: boolean,
 ): Promise<void> {
-  const config = await readConfig();
-  config[name] = {
-    ...config[name],
-    status: (config[name] as ProjectConfigEntry)?.status || "待辦",
-    pinned,
-  };
-  await writeConfig(config);
+  await withLock(LOCK_KEY, async () => {
+    const config = await readConfig();
+    config[name] = {
+      ...config[name],
+      status: (config[name] as ProjectConfigEntry)?.status || "待辦",
+      pinned,
+    };
+    await writeConfig(config);
+  });
 }
 
 export async function batchUpdatePinOrder(
   updates: { name: string; pinOrder: number }[],
 ): Promise<void> {
-  const config = await readConfig();
-  for (const { name, pinOrder } of updates) {
-    config[name] = {
-      ...config[name],
-      status: (config[name] as ProjectConfigEntry)?.status || "待辦",
-      pinOrder,
-    };
-  }
-  await writeConfig(config);
+  await withLock(LOCK_KEY, async () => {
+    const config = await readConfig();
+    for (const { name, pinOrder } of updates) {
+      config[name] = {
+        ...config[name],
+        status: (config[name] as ProjectConfigEntry)?.status || "待辦",
+        pinOrder,
+      };
+    }
+    await writeConfig(config);
+  });
 }
 
 // 排除 pattern 管理（存在 _settings key 下）
@@ -147,22 +165,26 @@ export async function getExcludePatterns(): Promise<string[]> {
 }
 
 export async function addExcludePattern(pattern: string): Promise<void> {
-  const config = await readConfig();
-  const settings = (config._settings as SettingsEntry) || {};
-  const patterns = settings.excludePatterns || [];
-  if (!patterns.includes(pattern)) {
-    patterns.push(pattern);
-  }
-  config._settings = { ...settings, excludePatterns: patterns };
-  await writeConfig(config);
+  await withLock(LOCK_KEY, async () => {
+    const config = await readConfig();
+    const settings = (config._settings as SettingsEntry) || {};
+    const patterns = settings.excludePatterns || [];
+    if (!patterns.includes(pattern)) {
+      patterns.push(pattern);
+    }
+    config._settings = { ...settings, excludePatterns: patterns };
+    await writeConfig(config);
+  });
 }
 
 export async function removeExcludePattern(pattern: string): Promise<void> {
-  const config = await readConfig();
-  const settings = (config._settings as SettingsEntry) || {};
-  const patterns = (settings.excludePatterns || []).filter(
-    (p) => p !== pattern,
-  );
-  config._settings = { ...settings, excludePatterns: patterns };
-  await writeConfig(config);
+  await withLock(LOCK_KEY, async () => {
+    const config = await readConfig();
+    const settings = (config._settings as SettingsEntry) || {};
+    const patterns = (settings.excludePatterns || []).filter(
+      (p) => p !== pattern,
+    );
+    config._settings = { ...settings, excludePatterns: patterns };
+    await writeConfig(config);
+  });
 }

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Project } from "@/lib/types";
+import { useToast } from "./ToastProvider";
 
 interface Props {
   projects: Project[];
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export default function PinnedBar({ projects, onUnpin, onReorder }: Props) {
+  const { toast } = useToast();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
 
@@ -23,7 +25,7 @@ export default function PinnedBar({ projects, onUnpin, onReorder }: Props) {
         body: JSON.stringify({ path, action }),
       });
     } catch {
-      alert("開啟失敗");
+      toast("開啟失敗", "error");
     }
   };
 

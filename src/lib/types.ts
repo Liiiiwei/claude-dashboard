@@ -31,6 +31,7 @@ export interface Project {
   pinOrder: number; // 釘選列順序，數字越小越前面
   scripts: string[]; // package.json 中的 scripts
   depsCount: number | null; // 相依套件數量
+  runningPort: number | null; // 目前正在執行的 dev server port，未執行為 null
 }
 
 export const TAG_LABELS = [

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { scanProjects } from "@/lib/scanner";
 import { setProjectStatus } from "@/lib/config";
+import { detectListeningServers } from "@/lib/process-detect";
+import { checkOrigin } from "@/lib/api-guard";
 import type { Project, ProjectStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -29,10 +31,29 @@ async function getCachedProjects(): Promise<Project[]> {
   return data;
 }
 
+// 將即時偵測到的 dev server 對應回各專案（runningPort 屬易變狀態，不進快取）
+function withRunningState(projects: Project[]): Project[] {
+  let servers: { port: number; cwd: string | null }[] = [];
+  try {
+    servers = detectListeningServers();
+  } catch {
+    // 偵測失敗時退回 runningPort = null，不影響專案清單回傳
+    servers = [];
+  }
+  const pathToPort = new Map<string, number>();
+  for (const s of servers) {
+    if (s.cwd) pathToPort.set(s.cwd, s.port);
+  }
+  return projects.map((p) => ({
+    ...p,
+    runningPort: pathToPort.get(p.path) ?? null,
+  }));
+}
+
 export async function GET() {
   try {
     const projects = await getCachedProjects();
-    return NextResponse.json(projects);
+    return NextResponse.json(withRunningState(projects));
   } catch (error) {
     console.error("掃描專案失敗:", error);
     return NextResponse.json({ error: "掃描專案失敗" }, { status: 500 });
@@ -40,6 +61,9 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
+  const denied = checkOrigin(request);
+  if (denied) return denied;
+
   const { name, status } = await request.json();
 
   const validStatuses: ProjectStatus[] = ["待辦", "進行中", "已完成", "暫停"];
@@ -59,6 +83,9 @@ export async function PUT(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const denied = checkOrigin(request);
+  if (denied) return denied;
+
   const { name, field, value } = await request.json();
 
   if (!name || !field) {

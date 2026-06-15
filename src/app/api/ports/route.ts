@@ -6,12 +6,10 @@ import {
   setAssignedPort,
   removeAssignment,
 } from "@/lib/port-registry";
+import { SCAN_DIR } from "@/lib/paths";
+import { checkOrigin } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
-
-const SCAN_DIR =
-  process.env.SCAN_DIR ||
-  (process.env.HOME || "") + "/Desktop/vibe-coding playground";
 
 // 從 cwd 解析專案名稱
 function resolveProjectName(cwd: string | null): string | null {
@@ -62,6 +60,8 @@ export async function GET() {
 
 // POST: kill / killAll / assign / unassign
 export async function POST(request: NextRequest) {
+  const denied = checkOrigin(request);
+  if (denied) return denied;
   try {
     const body = await request.json();
     const { action } = body;

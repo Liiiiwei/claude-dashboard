@@ -8,6 +8,7 @@ import SkeletonCard from "./SkeletonCard";
 import KanbanBoard from "./KanbanBoard";
 import PinnedBar from "./PinnedBar";
 import PortManager from "./PortManager";
+import { useToast } from "./ToastProvider";
 
 interface SystemStats {
   cpu: number;
@@ -15,6 +16,7 @@ interface SystemStats {
 }
 
 export default function Dashboard() {
+  const { toast } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,10 +44,12 @@ export default function Dashboard() {
       | "list"
       | "kanban"
       | null;
+    const savedGroup = localStorage.getItem("dashboard-group");
     if (savedTab) setTab(savedTab);
     if (savedTag) setActiveTag(savedTag);
     if (savedSort) setSortBy(savedSort);
     if (savedView) setView(savedView);
+    if (savedGroup) setActiveGroup(savedGroup);
   }, []);
 
   const [runningPorts, setRunningPorts] = useState<Record<string, number>>({});
@@ -65,6 +69,9 @@ export default function Dashboard() {
   useEffect(() => {
     localStorage.setItem("dashboard-tab", tab);
   }, [tab]);
+  useEffect(() => {
+    localStorage.setItem("dashboard-group", activeGroup);
+  }, [activeGroup]);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -74,6 +81,15 @@ export default function Dashboard() {
       if (!res.ok) throw new Error("掃描失敗");
       const data: Project[] = await res.json();
       setProjects(data);
+      // 用後端即時偵測結果補上正在執行的 server，讓初次載入就能看到狀態
+      setRunningPorts((prev) => {
+        const next = { ...prev };
+        for (const p of data) {
+          if (p.runningPort != null) next[p.path] = p.runningPort;
+          else if (next[p.path] != null) delete next[p.path];
+        }
+        return next;
+      });
       hasLoadedRef.current = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "未知錯誤");
@@ -120,13 +136,18 @@ export default function Dashboard() {
       const failed =
         data.results?.filter((r: { success: boolean }) => !r.success) || [];
       if (failed.length > 0) {
-        alert(`已提交 ${data.committed} 個專案，${failed.length} 個失敗`);
+        toast(
+          `已提交 ${data.committed} 個專案，${failed.length} 個失敗`,
+          "error",
+        );
+      } else {
+        toast(`已提交 ${data.committed} 個專案`, "success");
       }
       setShowCommitDialog(false);
       setCommitMsg("");
       fetchProjects();
     } catch {
-      alert("批次提交失敗");
+      toast("批次提交失敗", "error");
     } finally {
       setCommitting(false);
     }
@@ -145,10 +166,10 @@ export default function Dashboard() {
           prev.map((p) => (p.name === name ? { ...p, status } : p)),
         );
       } catch {
-        alert("狀態更新失敗");
+        toast("狀態更新失敗", "error");
       }
     },
-    [],
+    [toast],
   );
 
   const handleDevServerStarted = useCallback(
@@ -185,44 +206,53 @@ export default function Dashboard() {
     [projects],
   );
 
-  const handleUnpin = useCallback(async (name: string) => {
-    try {
-      await fetch("/api/projects", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, field: "pinned", value: false }),
-      });
-      setProjects((prev) =>
-        prev.map((p) => (p.name === name ? { ...p, pinned: false } : p)),
-      );
-    } catch {
-      alert("取消釘選失敗");
-    }
-  }, []);
+  const handleUnpin = useCallback(
+    async (name: string) => {
+      try {
+        await fetch("/api/projects", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, field: "pinned", value: false }),
+        });
+        setProjects((prev) =>
+          prev.map((p) => (p.name === name ? { ...p, pinned: false } : p)),
+        );
+      } catch {
+        toast("取消釘選失敗", "error");
+      }
+    },
+    [toast],
+  );
 
   // 拖移釘選列重新排序：optimistic 更新 + PATCH 寫回
-  const handleReorderPinned = useCallback(async (orderedNames: string[]) => {
-    const updates = orderedNames.map((name, idx) => ({ name, pinOrder: idx }));
-    setProjects((prev) =>
-      prev.map((p) => {
-        const idx = orderedNames.indexOf(p.name);
-        return idx >= 0 ? { ...p, pinOrder: idx } : p;
-      }),
-    );
-    try {
-      await fetch("/api/projects", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "_batch",
-          field: "pinOrder",
-          value: updates,
+  const handleReorderPinned = useCallback(
+    async (orderedNames: string[]) => {
+      const updates = orderedNames.map((name, idx) => ({
+        name,
+        pinOrder: idx,
+      }));
+      setProjects((prev) =>
+        prev.map((p) => {
+          const idx = orderedNames.indexOf(p.name);
+          return idx >= 0 ? { ...p, pinOrder: idx } : p;
         }),
-      });
-    } catch {
-      alert("儲存順序失敗");
-    }
-  }, []);
+      );
+      try {
+        await fetch("/api/projects", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "_batch",
+            field: "pinOrder",
+            value: updates,
+          }),
+        });
+      } catch {
+        toast("儲存順序失敗", "error");
+      }
+    },
+    [toast],
+  );
 
   const filtered = useMemo(
     () =>
@@ -284,8 +314,11 @@ export default function Dashboard() {
           <button
             onClick={fetchProjects}
             disabled={loading}
-            className="px-5 py-2.5 glass-button rounded-xl text-sm font-medium text-gray-600 disabled:opacity-50"
+            className="px-5 py-2.5 glass-button rounded-xl text-sm font-medium text-gray-600 disabled:opacity-50 inline-flex items-center gap-1.5"
           >
+            <span className={loading ? "spin" : ""} aria-hidden>
+              ↻
+            </span>
             刷新
           </button>
         </div>
@@ -293,7 +326,7 @@ export default function Dashboard() {
 
       {/* 系統狀態 + Port 管理 */}
       {systemStats && (
-        <div className="flex flex-wrap items-center gap-4 mb-4 px-4 py-2.5 glass rounded-xl text-xs relative">
+        <div className="flex flex-wrap items-center gap-4 mb-4 px-4 py-2.5 glass rounded-xl text-xs">
           <div className="flex items-center gap-2">
             <span className="text-gray-400">CPU</span>
             <div className="w-20 h-1.5 bg-white/40 rounded-full overflow-hidden">
@@ -454,6 +487,19 @@ export default function Dashboard() {
             ))}
           </div>
         ))}
+
+      {/* 日常任務分頁：功能尚未開放，先顯示佔位狀態 */}
+      {tab === "daily" && (
+        <div className="glass-card flex flex-col items-center justify-center rounded-2xl py-20 text-center text-gray-400">
+          <div className="mb-3 text-4xl" aria-hidden>
+            🗓️
+          </div>
+          <p className="text-lg font-medium text-gray-500">日常任務即將推出</p>
+          <p className="mt-2 max-w-sm text-sm">
+            這裡之後會放每日例行事項與待辦清單，目前還在施工中。
+          </p>
+        </div>
+      )}
 
       {/* 批次提交對話框 */}
       {showCommitDialog && (

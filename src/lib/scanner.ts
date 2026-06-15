@@ -4,13 +4,10 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import type { Project } from "./types";
 import { readConfig, getExcludePatterns } from "./config";
+import { SCAN_DIR } from "./paths";
 
 // 將 exec 包裝成 Promise，避免阻塞 event loop
 const execAsync = promisify(exec);
-
-const SCAN_DIR =
-  process.env.SCAN_DIR ||
-  join(process.env.HOME || "", "Desktop", "vibe-coding playground");
 
 async function detectTags(projectPath: string): Promise<string[]> {
   const tags: string[] = [];
@@ -258,6 +255,7 @@ export async function scanProjects(): Promise<Project[]> {
         pinOrder: config[entry.name]?.pinOrder ?? 999,
         scripts: pkgInfo.scripts,
         depsCount: pkgInfo.depsCount,
+        runningPort: null, // 由 API 層合併即時偵測結果填入
       } satisfies Project;
     }),
   );

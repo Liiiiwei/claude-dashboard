@@ -4,6 +4,7 @@ import { access } from "fs/promises";
 import net from "net";
 import { detectServerForPath } from "@/lib/process-detect";
 import { getAssignedPort } from "@/lib/port-registry";
+import { checkOrigin, isPathAllowed } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,34 @@ function isPortAvailable(port: number): Promise<boolean> {
     });
     server.listen(port, "127.0.0.1");
   });
+}
+
+// 嘗試連上指定 port，確認 server 真的開始監聽
+function canConnect(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ port, host: "127.0.0.1" });
+    const done = (ok: boolean) => {
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.setTimeout(1000);
+    socket.once("connect", () => done(true));
+    socket.once("timeout", () => done(false));
+    socket.once("error", () => done(false));
+  });
+}
+
+// 輪詢等待 server 真正就緒（最多 timeoutMs），避免回報「假性啟動成功」
+async function waitForServerReady(
+  port: number,
+  timeoutMs = 20_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await canConnect(port)) return true;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return false;
 }
 
 // 用 lsof 找出佔用指定 port 的 PID 並終止
@@ -51,7 +80,15 @@ function killProcessOnPort(port: number): void {
 }
 
 export async function POST(request: NextRequest) {
+  const denied = checkOrigin(request);
+  if (denied) return denied;
+
   const { path, action } = await request.json();
+
+  // 限制只能操作掃描目錄內的路徑，避免被誘導對任意路徑啟動 process
+  if (!isPathAllowed(path)) {
+    return NextResponse.json({ error: "路徑不在允許範圍內" }, { status: 400 });
+  }
 
   try {
     await access(path);
@@ -89,8 +126,18 @@ export async function POST(request: NextRequest) {
       child.unref();
 
       if (child.pid) {
-        // 等待一下讓 server 啟動
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        // 輪詢直到 server 真的能連上，而非固定等 2 秒就回報成功
+        const ready = await waitForServerReady(port);
+        if (!ready) {
+          return NextResponse.json(
+            {
+              error: "啟動逾時，server 未在時間內開始監聽",
+              pid: child.pid,
+              port,
+            },
+            { status: 504 },
+          );
+        }
         return NextResponse.json({ running: true, port, pid: child.pid });
       }
       return NextResponse.json({ error: "啟動失敗" }, { status: 500 });

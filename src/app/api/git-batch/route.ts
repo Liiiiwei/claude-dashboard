@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { spawnSync } from "child_process";
 import { scanProjects } from "@/lib/scanner";
+import { checkOrigin } from "@/lib/api-guard";
 
 export async function POST(request: NextRequest) {
+  const denied = checkOrigin(request);
+  if (denied) return denied;
+
   const { message } = await request.json();
 
   if (!message || typeof message !== "string" || message.trim().length === 0) {
@@ -28,7 +32,11 @@ export async function POST(request: NextRequest) {
           encoding: "utf-8",
         });
         if (add.status !== 0) {
-          results.push({ name: project.name, success: false, error: add.stderr || "git add 失敗" });
+          results.push({
+            name: project.name,
+            success: false,
+            error: add.stderr || "git add 失敗",
+          });
           continue;
         }
 
@@ -38,7 +46,11 @@ export async function POST(request: NextRequest) {
           encoding: "utf-8",
         });
         if (commit.status !== 0) {
-          results.push({ name: project.name, success: false, error: commit.stderr || "git commit 失敗" });
+          results.push({
+            name: project.name,
+            success: false,
+            error: commit.stderr || "git commit 失敗",
+          });
           continue;
         }
 

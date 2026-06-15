@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import type { Project } from "@/lib/types";
+import { useToast } from "./ToastProvider";
 
 const TAG_COLORS: Record<string, string> = {
   "Next.js": "glass-blue",
@@ -53,6 +54,7 @@ function ProjectCard({
   runningPort = null,
   onDevServerStarted,
 }: Props) {
+  const { toast, confirm } = useToast();
   const [devPort, setDevPort] = useState<number | null>(runningPort);
   const [devLoading, setDevLoading] = useState(false);
   const [openLoading, setOpenLoading] = useState<"finder" | "cmux" | null>(
@@ -60,6 +62,27 @@ function ProjectCard({
   );
   const [showGroupPicker, setShowGroupPicker] = useState(false);
   const [customGroup, setCustomGroup] = useState("");
+  const groupPickerRef = useRef<HTMLDivElement>(null);
+
+  // 後端偵測到的執行狀態（runningPort）變動時同步本地顯示
+  useEffect(() => {
+    setDevPort(runningPort);
+  }, [runningPort]);
+
+  // 點擊分組選單外面時自動關閉
+  useEffect(() => {
+    if (!showGroupPicker) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        groupPickerRef.current &&
+        !groupPickerRef.current.contains(e.target as Node)
+      ) {
+        setShowGroupPicker(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showGroupPicker]);
 
   const handleOpen = async (action: "finder" | "cmux") => {
     if (openLoading) return;
@@ -72,10 +95,10 @@ function ProjectCard({
       });
       if (!res.ok) {
         const data = await res.json();
-        alert(data.error || "操作失敗");
+        toast(data.error || "操作失敗", "error");
       }
     } catch {
-      alert("無法連線到伺服器");
+      toast("無法連線到伺服器", "error");
     } finally {
       setOpenLoading(null);
     }
@@ -96,15 +119,15 @@ function ProjectCard({
       setCustomGroup("");
       onUpdate?.();
     } catch {
-      alert("設定分組失敗");
+      toast("設定分組失敗", "error");
     }
   };
 
   const handleHide = async () => {
-    if (
-      !confirm(`確定要隱藏「${project.name}」？可在篩選列的「已隱藏」中恢復。`)
-    )
-      return;
+    const ok = await confirm(
+      `確定要隱藏「${project.name}」？可在篩選列的「已隱藏」中恢復。`,
+    );
+    if (!ok) return;
     try {
       await fetch("/api/projects", {
         method: "PATCH",
@@ -117,7 +140,7 @@ function ProjectCard({
       });
       onUpdate?.();
     } catch {
-      alert("隱藏失敗");
+      toast("隱藏失敗", "error");
     }
   };
 
@@ -134,7 +157,7 @@ function ProjectCard({
       });
       onUpdate?.();
     } catch {
-      alert("釘選失敗");
+      toast("釘選失敗", "error");
     }
   };
 
@@ -150,11 +173,12 @@ function ProjectCard({
       if (data.running) {
         setDevPort(data.port);
         onDevServerStarted?.(project.path, data.port);
+        toast(`已啟動 localhost:${data.port}`, "success");
       } else {
-        alert(data.error || "啟動失敗");
+        toast(data.error || "啟動失敗", "error");
       }
     } catch {
-      alert("啟動失敗");
+      toast("啟動失敗", "error");
     } finally {
       setDevLoading(false);
     }
@@ -213,7 +237,10 @@ function ProjectCard({
       )}
 
       {/* 分組 + 標籤 */}
-      <div className="flex flex-wrap gap-1 mb-1.5 relative">
+      <div
+        className="flex flex-wrap gap-1 mb-1.5 relative"
+        ref={groupPickerRef}
+      >
         <button
           onClick={() => setShowGroupPicker(!showGroupPicker)}
           className={`px-1.5 py-0.5 text-[11px] rounded-full transition-colors ${

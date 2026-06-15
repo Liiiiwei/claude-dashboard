@@ -1,12 +1,9 @@
 import { NextResponse } from "next/server";
 import { detectListeningServers } from "@/lib/process-detect";
 import { basename } from "path";
+import { SCAN_DIR } from "@/lib/paths";
 
 export const dynamic = "force-dynamic";
-
-const SCAN_DIR =
-  process.env.SCAN_DIR ||
-  (process.env.HOME || "") + "/Desktop/vibe-coding playground";
 
 export async function GET() {
   try {

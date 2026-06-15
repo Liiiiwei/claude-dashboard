@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useToast } from "./ToastProvider";
 
 interface Props {
   tags: string[];
@@ -23,8 +24,25 @@ export default function FilterBar({
   onViewChange,
   onUpdate,
 }: Props) {
+  const { toast } = useToast();
   const [showExcluded, setShowExcluded] = useState(false);
   const [excludePatterns, setExcludePatterns] = useState<string[]>([]);
+  const excludedRef = useRef<HTMLDivElement>(null);
+
+  // 點擊「已隱藏」面板外面時自動關閉
+  useEffect(() => {
+    if (!showExcluded) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        excludedRef.current &&
+        !excludedRef.current.contains(e.target as Node)
+      ) {
+        setShowExcluded(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showExcluded]);
 
   const fetchExcluded = async () => {
     try {
@@ -58,7 +76,7 @@ export default function FilterBar({
       setExcludePatterns((prev) => prev.filter((p) => p !== pattern));
       onUpdate?.();
     } catch {
-      alert("恢復失敗");
+      toast("恢復失敗", "error");
     }
   };
 
@@ -121,7 +139,7 @@ export default function FilterBar({
       </div>
 
       {/* 已隱藏管理 */}
-      <div className="relative">
+      <div className="relative" ref={excludedRef}>
         <button
           onClick={() => setShowExcluded(!showExcluded)}
           className="px-3 py-1.5 text-xs rounded-full glass-button text-gray-400 hover:text-gray-600 transition-colors"
