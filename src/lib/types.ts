@@ -46,6 +46,7 @@ export interface DailyTask {
   tags: string[]; // 行內所有 #tag（不含 # 前綴）
   category: "ai-auto" | "ai-draft" | "human" | "uncategorized"; // 依 tag 分組
   sourceFile: string; // 來源相對路徑（相對於 vault 根）
+  lineNumber: number; // 該待辦在來源 .md 檔內的行號（1-based）
 }
 
 // /api/daily-tasks 的回傳形狀。groups 依 category 分組，counts 為各組計數。

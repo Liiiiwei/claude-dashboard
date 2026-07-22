@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, rm } from "fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import { register } from "node:module";
@@ -14,6 +14,8 @@ const {
   groupTasks,
   isTaskFile,
   scanDailyTasks,
+  completeTasks,
+  taipeiToday,
 } = await import("../src/lib/daily-tasks.ts");
 
 // ── 純函式：單行解析 ──
@@ -160,5 +162,186 @@ test("scanDailyTasks：vault 子目錄不存在時容錯回空結果", async () 
   assert.equal(res.counts["ai-auto"], 0);
   assert.equal(res.counts["ai-draft"], 0);
   assert.equal(res.counts.uncategorized, 0);
+  await rm(vault, { recursive: true, force: true });
+});
+
+// ── lineNumber：解析行號正確 ──
+
+test("parseTaskLine：帶入 1-based lineNumber", () => {
+  const task = parseTaskLine("- [ ] 做一件事", "c", "x.md", 7);
+  assert.ok(task);
+  assert.equal(task.lineNumber, 7);
+});
+
+test("parseTasksFromContent：lineNumber 對應各待辦的實際行號", () => {
+  const content = [
+    "## 待辦事項", // 行 1
+    "- [ ] A #ai-auto", // 行 2
+    "一般文字", // 行 3
+    "- [x] 已完成", // 行 4（排除）
+    "- [ ] B #human", // 行 5
+  ].join("\n");
+  const tasks = parseTasksFromContent(content, "客戶", "x.md");
+  assert.equal(tasks.length, 2);
+  assert.equal(tasks[0].text, "A");
+  assert.equal(tasks[0].lineNumber, 2);
+  assert.equal(tasks[1].text, "B");
+  assert.equal(tasks[1].lineNumber, 5);
+});
+
+// ── 日期格式 ──
+
+test("taipeiToday：回傳 YYYY-MM-DD 格式", () => {
+  assert.match(taipeiToday(), /^\d{4}-\d{2}-\d{2}$/);
+});
+
+// ── completeTasks 勾銷寫回層 ──
+
+// 建一個含待辦子目錄的 tmp vault，回傳 vault 根與檔案相對路徑
+async function makeVault(fileContent: string): Promise<{
+  vault: string;
+  sourceFile: string;
+  filePath: string;
+}> {
+  const vault = await mkdtemp(join(tmpdir(), "vault-write-"));
+  const clientDir = join(vault, "02-Projects", "接案專案");
+  await mkdir(clientDir, { recursive: true });
+  const filePath = join(clientDir, "宇皇.md");
+  await writeFile(filePath, fileContent);
+  return { vault, sourceFile: "02-Projects/接案專案/宇皇.md", filePath };
+}
+
+test("completeTasks：正常勾銷把 - [ ] 改為 - [x] 並補 ✅ 日期", async () => {
+  const { vault, sourceFile, filePath } = await makeVault(
+    ["## 待辦事項", "- [ ] 客戶待辦一 #human @客戶 📅 2026-07-15", ""].join(
+      "\n",
+    ),
+  );
+  const res = await completeTasks(
+    [{ sourceFile, lineNumber: 2, text: "客戶待辦一" }],
+    vault,
+    "2026-07-22",
+  );
+  assert.equal(res.completed, 1);
+  assert.deepEqual(res.failed, []);
+  const after = await readFile(filePath, "utf-8");
+  assert.match(
+    after,
+    /- \[x\] 客戶待辦一 #human @客戶 📅 2026-07-15 ✅ 2026-07-22/,
+  );
+  // 其他行不受影響
+  assert.ok(after.startsWith("## 待辦事項\n"));
+  await rm(vault, { recursive: true, force: true });
+});
+
+test("completeTasks：保留縮排", async () => {
+  const { vault, sourceFile, filePath } = await makeVault("\t- [ ] 縮排待辦\n");
+  const res = await completeTasks(
+    [{ sourceFile, lineNumber: 1, text: "縮排待辦" }],
+    vault,
+    "2026-07-22",
+  );
+  assert.equal(res.completed, 1);
+  const after = await readFile(filePath, "utf-8");
+  assert.match(after, /^\t- \[x\] 縮排待辦 ✅ 2026-07-22/);
+  await rm(vault, { recursive: true, force: true });
+});
+
+test("completeTasks：行已勾銷 → already-completed，不改檔", async () => {
+  const { vault, sourceFile, filePath } = await makeVault(
+    "- [x] 已完成的事 ✅ 2026-04-26\n",
+  );
+  const before = await readFile(filePath, "utf-8");
+  const res = await completeTasks(
+    [{ sourceFile, lineNumber: 1, text: "已完成的事" }],
+    vault,
+    "2026-07-22",
+  );
+  assert.equal(res.completed, 0);
+  assert.equal(res.failed[0].reason, "already-completed");
+  assert.equal(await readFile(filePath, "utf-8"), before); // 未被改動
+  await rm(vault, { recursive: true, force: true });
+});
+
+test("completeTasks：文字不符 → line-mismatch，不改檔", async () => {
+  const { vault, sourceFile, filePath } = await makeVault("- [ ] 真正的待辦\n");
+  const before = await readFile(filePath, "utf-8");
+  const res = await completeTasks(
+    [{ sourceFile, lineNumber: 1, text: "別的待辦" }],
+    vault,
+    "2026-07-22",
+  );
+  assert.equal(res.completed, 0);
+  assert.equal(res.failed[0].reason, "line-mismatch");
+  assert.equal(await readFile(filePath, "utf-8"), before);
+  await rm(vault, { recursive: true, force: true });
+});
+
+test("completeTasks：path traversal 被擋 → path-outside-vault", async () => {
+  const { vault } = await makeVault("- [ ] x\n");
+  const res = await completeTasks(
+    [
+      {
+        sourceFile: "../../../../../../etc/passwd",
+        lineNumber: 1,
+        text: "x",
+      },
+    ],
+    vault,
+    "2026-07-22",
+  );
+  assert.equal(res.completed, 0);
+  assert.equal(res.failed[0].reason, "path-outside-vault");
+  await rm(vault, { recursive: true, force: true });
+});
+
+test("completeTasks：檔案不存在 → file-not-found", async () => {
+  const { vault } = await makeVault("- [ ] x\n");
+  const res = await completeTasks(
+    [
+      {
+        sourceFile: "02-Projects/接案專案/不存在.md",
+        lineNumber: 1,
+        text: "x",
+      },
+    ],
+    vault,
+    "2026-07-22",
+  );
+  assert.equal(res.completed, 0);
+  assert.equal(res.failed[0].reason, "file-not-found");
+  await rm(vault, { recursive: true, force: true });
+});
+
+test("completeTasks：行號超出範圍 → line-out-of-range", async () => {
+  const { vault, sourceFile } = await makeVault("- [ ] x\n");
+  const res = await completeTasks(
+    [{ sourceFile, lineNumber: 99, text: "x" }],
+    vault,
+    "2026-07-22",
+  );
+  assert.equal(res.completed, 0);
+  assert.equal(res.failed[0].reason, "line-out-of-range");
+  await rm(vault, { recursive: true, force: true });
+});
+
+test("completeTasks：一筆失敗不中斷其他筆（部分成功）", async () => {
+  const { vault, sourceFile, filePath } = await makeVault(
+    ["- [ ] 待辦甲", "- [ ] 待辦乙"].join("\n"),
+  );
+  const res = await completeTasks(
+    [
+      { sourceFile, lineNumber: 1, text: "對不上的字" }, // 失敗
+      { sourceFile, lineNumber: 2, text: "待辦乙" }, // 成功
+    ],
+    vault,
+    "2026-07-22",
+  );
+  assert.equal(res.completed, 1);
+  assert.equal(res.failed.length, 1);
+  assert.equal(res.failed[0].reason, "line-mismatch");
+  const after = await readFile(filePath, "utf-8");
+  assert.match(after, /- \[ \] 待辦甲/); // 甲維持未勾
+  assert.match(after, /- \[x\] 待辦乙 ✅ 2026-07-22/); // 乙已勾
   await rm(vault, { recursive: true, force: true });
 });

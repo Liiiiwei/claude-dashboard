@@ -1,4 +1,4 @@
-import { readdir, readFile } from "fs/promises";
+import { readdir, readFile, writeFile } from "fs/promises";
 import { join, resolve, relative, isAbsolute, sep } from "path";
 import { OBSIDIAN_VAULT, TASK_SUBDIRS } from "./paths";
 import type { DailyTask, DailyTasksResponse } from "./types";
@@ -47,11 +47,12 @@ function cleanText(raw: string): string {
 }
 
 // 解析單行。若非未完成待辦則回傳 null。純函式，不觸檔案系統。
-// client：客戶／專案名；sourceFile：來源相對路徑。
+// client：客戶／專案名；sourceFile：來源相對路徑；lineNumber：該行 1-based 行號（預設 1）。
 export function parseTaskLine(
   line: string,
   client: string,
   sourceFile: string,
+  lineNumber: number = 1,
 ): DailyTask | null {
   const match = line.match(UNCHECKED_RE);
   if (!match) return null;
@@ -77,18 +78,21 @@ export function parseTaskLine(
     tags,
     category: categorize(tags),
     sourceFile,
+    lineNumber,
   };
 }
 
 // 解析整份檔案內容，逐行抓未完成待辦。純函式。
+// 每筆待辦帶入其相對 sourceFile 的實際行號（1-based）。
 export function parseTasksFromContent(
   content: string,
   client: string,
   sourceFile: string,
 ): DailyTask[] {
   const tasks: DailyTask[] = [];
-  for (const line of content.split("\n")) {
-    const task = parseTaskLine(line, client, sourceFile);
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const task = parseTaskLine(lines[i], client, sourceFile, i + 1);
     if (task) tasks.push(task);
   }
   return tasks;
@@ -177,6 +181,106 @@ export async function scanDailyTasks(
     counts,
     generatedAt: new Date().toISOString(),
   };
+}
+
+// ── 勾銷寫回層 ──
+// 受控的破壞性寫入：把 vault 內某待辦行的 `- [ ]` 就地改為 `- [x] … ✅ 日期`。
+// 安全性優先：逐筆校驗路徑邊界、行號、內容相符，任一不符即記為 failed 且不動檔案。
+
+// 單筆勾銷請求：來源相對路徑、1-based 行號、對應待辦的乾淨文字（用來防誤勾）。
+export interface CompleteTaskEntry {
+  sourceFile: string;
+  lineNumber: number;
+  text: string;
+}
+
+// 勾銷結果：completed 為成功筆數，failed 逐筆帶原始定位與失敗原因。
+export interface CompleteTasksResult {
+  completed: number;
+  failed: Array<{ sourceFile: string; lineNumber: number; reason: string }>;
+}
+
+// 取得 Asia/Taipei 當地日期，格式 YYYY-MM-DD。
+// 用 en-CA locale 產出 ISO 樣式日期，並固定時區，不受 server 時區影響。
+export function taipeiToday(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+// 逐筆勾銷。一筆失敗不中斷其他筆。
+// vaultRoot 預設 OBSIDIAN_VAULT；today 預設 taipeiToday()（測試可注入固定日期）。
+export async function completeTasks(
+  entries: CompleteTaskEntry[],
+  vaultRoot: string = OBSIDIAN_VAULT,
+  today: string = taipeiToday(),
+): Promise<CompleteTasksResult> {
+  const root = resolve(vaultRoot);
+  const failed: CompleteTasksResult["failed"] = [];
+  let completed = 0;
+
+  for (const entry of entries) {
+    const { sourceFile, lineNumber, text } = entry;
+    const fail = (reason: string) =>
+      failed.push({ sourceFile, lineNumber, reason });
+
+    // 1. 路徑邊界防護：解析為 vault 內絕對路徑，擋 ../ 穿越與越界寫入
+    const filePath = resolve(root, sourceFile);
+    if (!isWithinVault(root, filePath)) {
+      fail("path-outside-vault");
+      continue;
+    }
+
+    // 2. 讀檔：不存在或不可讀即失敗，不動任何檔案
+    let content: string;
+    try {
+      content = await readFile(filePath, "utf-8");
+    } catch {
+      fail("file-not-found");
+      continue;
+    }
+
+    // 3. 定位行號（1-based）。超出範圍視為對不上
+    const lines = content.split("\n");
+    const idx = lineNumber - 1;
+    if (idx < 0 || idx >= lines.length) {
+      fail("line-out-of-range");
+      continue;
+    }
+
+    // 保留可能的 CRLF 行尾，處理時先剝離 \r，寫回時補回
+    const rawLine = lines[idx];
+    const hasCR = rawLine.endsWith("\r");
+    const line = hasCR ? rawLine.slice(0, -1) : rawLine;
+
+    // 4. 校驗該行仍是未完成待辦（`- [ ]` 開頭）
+    const parsed = parseTaskLine(line, "", sourceFile, lineNumber);
+    if (!parsed) {
+      // 已勾銷 [x] / 已取消 [-] 給明確原因，其餘視為對不上
+      fail(
+        /^\s*-\s+\[[xX-]\]/.test(line) ? "already-completed" : "line-mismatch",
+      );
+      continue;
+    }
+
+    // 5. 校驗待辦文字與傳入 text 相符，防止行號錯位誤勾別的待辦
+    if (parsed.text !== text) {
+      fail("line-mismatch");
+      continue;
+    }
+
+    // 6. 校驗通過才就地改行：首個 `[ ]` → `[x]`，行尾補 ` ✅ 日期`，保留縮排與其餘內容
+    const updated = line.replace("[ ]", "[x]") + ` ✅ ${today}`;
+    lines[idx] = hasCR ? updated + "\r" : updated;
+
+    await writeFile(filePath, lines.join("\n"), "utf-8");
+    completed += 1;
+  }
+
+  return { completed, failed };
 }
 
 export { CATEGORIES };

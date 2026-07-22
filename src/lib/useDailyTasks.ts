@@ -6,11 +6,27 @@ import type { DailyTasksResponse } from "./types";
 // 四狀態機：loading（載入中）/ error（取數失敗）/ empty（四組皆空）/ success（有資料）
 export type DailyTasksStatus = "loading" | "error" | "empty" | "success";
 
+// 標記完成的 request 單筆內容（對齊 PATCH /api/daily-tasks 契約）
+export interface CompleteTaskInput {
+  sourceFile: string;
+  lineNumber: number;
+  text: string;
+}
+
+// 標記完成的 response 形狀（對齊契約）
+export interface CompleteTasksResult {
+  completed: number;
+  failed: { sourceFile: string; lineNumber: number; reason: string }[];
+  generatedAt: string;
+}
+
 export interface UseDailyTasksResult {
   data: DailyTasksResponse | null;
   status: DailyTasksStatus;
   error: string | null;
   refetch: () => Promise<void>;
+  completing: boolean; // 標記完成寫回進行中，供按鈕禁用
+  completeTasks: (tasks: CompleteTaskInput[]) => Promise<CompleteTasksResult>;
 }
 
 // 判斷是否四組皆空
@@ -30,6 +46,7 @@ export function useDailyTasks(): UseDailyTasksResult {
   const [data, setData] = useState<DailyTasksResponse | null>(null);
   const [status, setStatus] = useState<DailyTasksStatus>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [completing, setCompleting] = useState(false);
 
   const hasLoadedRef = useRef(false);
   const reqIdRef = useRef(0);
@@ -64,6 +81,29 @@ export function useDailyTasks(): UseDailyTasksResult {
     }
   }, []);
 
+  // 標記完成 mutation：PATCH 寫回 Obsidian，成功後 refetch 重新載入。
+  // 回傳 result（含 failed）供 UI 顯示；自身用 completing 旗標供按鈕禁用。
+  const completeTasks = useCallback(
+    async (tasks: CompleteTaskInput[]): Promise<CompleteTasksResult> => {
+      setCompleting(true);
+      try {
+        const res = await fetch("/api/daily-tasks", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tasks }),
+        });
+        if (!res.ok) throw new Error("標記完成失敗");
+        const result = (await res.json()) as CompleteTasksResult;
+        // 寫回後重新載入清單（loading 態不被觸發，沿用既有資料）
+        await refetch();
+        return result;
+      } finally {
+        setCompleting(false);
+      }
+    },
+    [refetch],
+  );
+
   useEffect(() => {
     refetch();
     return () => {
@@ -72,5 +112,5 @@ export function useDailyTasks(): UseDailyTasksResult {
     };
   }, [refetch]);
 
-  return { data, status, error, refetch };
+  return { data, status, error, refetch, completing, completeTasks };
 }
