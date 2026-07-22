@@ -10,6 +10,7 @@ import PinnedBar from "./PinnedBar";
 import PortManager from "./PortManager";
 import SystemStatsBar from "./SystemStatsBar";
 import CommitDialog from "./CommitDialog";
+import DailyTasks from "./DailyTasks";
 import { useToast } from "./ToastProvider";
 import { useLocalStorageState } from "@/lib/useLocalStorageState";
 import { useProjects } from "@/lib/useProjects";
@@ -38,10 +39,6 @@ export default function Dashboard() {
   const [showCommitDialog, setShowCommitDialog] = useState(false);
 
   // 使用者偏好：以 localStorage 同步，避免 hydration mismatch（見 hook 實作）
-  const [tab, setTab] = useLocalStorageState<"projects" | "daily">(
-    "dashboard-tab",
-    "projects",
-  );
   const [activeTag, setActiveTag] = useLocalStorageState(
     "dashboard-tag",
     "全部",
@@ -268,41 +265,8 @@ export default function Dashboard() {
         />
       )}
 
-      {/* 分頁切換 */}
-      <div
-        role="tablist"
-        aria-label="儀表板分頁"
-        className="flex gap-1 mb-6 border-b border-white/40"
-      >
-        <button
-          role="tab"
-          id="tab-projects"
-          aria-selected={tab === "projects"}
-          aria-controls="panel-projects"
-          onClick={() => setTab("projects")}
-          className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
-            tab === "projects"
-              ? "border-blue-500 text-blue-600"
-              : "border-transparent text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          專案看板
-        </button>
-        <button
-          role="tab"
-          id="tab-daily"
-          aria-selected={tab === "daily"}
-          aria-controls="panel-daily"
-          onClick={() => setTab("daily")}
-          className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
-            tab === "daily"
-              ? "border-blue-500 text-blue-600"
-              : "border-transparent text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          日常任務
-        </button>
-      </div>
+      {/* 日常任務面板：直接顯示於看板上方，跨客戶待辦一眼可見 */}
+      <DailyTasks />
 
       {/* 錯誤優先於空狀態：載入失敗時顯示可重試的錯誤橫幅 */}
       {error && (
@@ -318,113 +282,94 @@ export default function Dashboard() {
         </div>
       )}
 
-      {tab === "projects" && (
-        <div role="tabpanel" id="panel-projects" aria-labelledby="tab-projects">
-          {!loading && !error && projects.length > 0 && (
-            <FilterBar
-              tags={allTags}
-              activeTag={activeTag}
-              onTagChange={setActiveTag}
-              sortBy={sortBy}
-              onSortChange={setSortBy}
-              view={view}
-              onViewChange={setView}
-              onUpdate={fetchProjects}
-            />
-          )}
+      {/* 專案看板：與日常任務同時呈現，不再用分頁隱藏 */}
+      <div>
+        {!loading && !error && projects.length > 0 && (
+          <FilterBar
+            tags={allTags}
+            activeTag={activeTag}
+            onTagChange={setActiveTag}
+            sortBy={sortBy}
+            onSortChange={setSortBy}
+            view={view}
+            onViewChange={setView}
+            onUpdate={fetchProjects}
+          />
+        )}
 
-          {!loading && !error && allGroups.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-4">
-              <span className="text-xs text-gray-500 py-2">分組：</span>
+        {!loading && !error && allGroups.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-4">
+            <span className="text-xs text-gray-500 py-2">分組：</span>
+            <button
+              onClick={() => setActiveGroup("全部")}
+              className={`px-3 py-1.5 text-xs rounded-full transition-all ${
+                activeGroup === "全部"
+                  ? "glass-button-active text-gray-800 font-medium"
+                  : "glass-button text-gray-500"
+              }`}
+            >
+              全部
+            </button>
+            {allGroups.map((g) => (
               <button
-                onClick={() => setActiveGroup("全部")}
+                key={g}
+                onClick={() => setActiveGroup(g)}
                 className={`px-3 py-1.5 text-xs rounded-full transition-all ${
-                  activeGroup === "全部"
+                  activeGroup === g
                     ? "glass-button-active text-gray-800 font-medium"
                     : "glass-button text-gray-500"
                 }`}
               >
-                全部
+                {g}
               </button>
-              {allGroups.map((g) => (
-                <button
-                  key={g}
-                  onClick={() => setActiveGroup(g)}
-                  className={`px-3 py-1.5 text-xs rounded-full transition-all ${
-                    activeGroup === g
-                      ? "glass-button-active text-gray-800 font-medium"
-                      : "glass-button text-gray-500"
-                  }`}
-                >
-                  {g}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <SkeletonCard key={i} />
-              ))}
-            </div>
-          ) : error ? null : sorted // 錯誤時不顯示空狀態，橫幅已在上方呈現
-            .length === 0 ? (
-            <div className="text-center py-20 text-gray-500">
-              <p className="text-lg">沒有找到任何專案</p>
-              <p className="text-sm mt-2">
-                {activeTag !== "全部" || activeGroup !== "全部"
-                  ? "嘗試切換篩選條件"
-                  : "請確認掃描目錄是否正確"}
-              </p>
-            </div>
-          ) : view === "kanban" ? (
-            <KanbanBoard
-              projects={sorted}
-              onStatusChange={handleStatusChange}
-              onUpdate={fetchProjects}
-              allGroups={allGroups}
-              runningPorts={runningPortsByPath}
-              degraded={degraded}
-              onDevServerStarted={handleDevServerStarted}
-            />
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {sorted.map((project) => (
-                <ProjectCard
-                  key={project.path}
-                  project={project}
-                  onUpdate={fetchProjects}
-                  allGroups={allGroups}
-                  runningPort={runningPortsByPath[project.path] ?? null}
-                  degraded={degraded}
-                  loading={loading}
-                  onDevServerStarted={handleDevServerStarted}
-                  onStatusChange={handleStatusChange}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 日常任務分頁：功能尚未開放，先顯示佔位狀態 */}
-      {tab === "daily" && (
-        <div
-          role="tabpanel"
-          id="panel-daily"
-          aria-labelledby="tab-daily"
-          className="glass-card flex flex-col items-center justify-center rounded-2xl py-20 text-center text-gray-500"
-        >
-          <div className="mb-3 text-4xl" aria-hidden>
-            🗓️
+            ))}
           </div>
-          <p className="text-lg font-medium text-gray-500">日常任務即將推出</p>
-          <p className="mt-2 max-w-sm text-sm">
-            這裡之後會放每日例行事項與待辦清單，目前還在施工中。
-          </p>
-        </div>
-      )}
+        )}
+
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <SkeletonCard key={i} />
+            ))}
+          </div>
+        ) : error ? null : sorted // 錯誤時不顯示空狀態，橫幅已在上方呈現
+          .length === 0 ? (
+          <div className="text-center py-20 text-gray-500">
+            <p className="text-lg">沒有找到任何專案</p>
+            <p className="text-sm mt-2">
+              {activeTag !== "全部" || activeGroup !== "全部"
+                ? "嘗試切換篩選條件"
+                : "請確認掃描目錄是否正確"}
+            </p>
+          </div>
+        ) : view === "kanban" ? (
+          <KanbanBoard
+            projects={sorted}
+            onStatusChange={handleStatusChange}
+            onUpdate={fetchProjects}
+            allGroups={allGroups}
+            runningPorts={runningPortsByPath}
+            degraded={degraded}
+            onDevServerStarted={handleDevServerStarted}
+          />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {sorted.map((project) => (
+              <ProjectCard
+                key={project.path}
+                project={project}
+                onUpdate={fetchProjects}
+                allGroups={allGroups}
+                runningPort={runningPortsByPath[project.path] ?? null}
+                degraded={degraded}
+                loading={loading}
+                onDevServerStarted={handleDevServerStarted}
+                onStatusChange={handleStatusChange}
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* 批次提交對話框 */}
       {showCommitDialog && (
