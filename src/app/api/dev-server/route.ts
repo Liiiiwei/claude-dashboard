@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawn, execSync } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { access } from "fs/promises";
 import net from "net";
 import { detectServerForPath } from "@/lib/process-detect";
@@ -49,12 +49,16 @@ async function waitForServerReady(
 }
 
 // 用 lsof 找出佔用指定 port 的 PID 並終止
+// 用 spawnSync 直接執行 lsof、不經 shell，port 以陣列參數傳入，杜絕指令注入
 function killProcessOnPort(port: number): void {
+  // 防呆：只接受合法 port 數字，避免污染值流入（呼叫端理應已驗，這裡再守一層）
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return;
   try {
-    const output = execSync(
-      `lsof -iTCP:${port} -sTCP:LISTEN -t 2>/dev/null || true`,
-      { encoding: "utf-8", timeout: 5000 },
-    );
+    const result = spawnSync("lsof", ["-iTCP:" + port, "-sTCP:LISTEN", "-t"], {
+      encoding: "utf-8",
+      timeout: 5000,
+    });
+    const output = result.stdout || "";
     const pids = output
       .trim()
       .split("\n")
@@ -98,7 +102,7 @@ export async function POST(request: NextRequest) {
 
   if (action === "start") {
     // 先用系統偵測檢查是否已在執行
-    const existing = detectServerForPath(path);
+    const existing = await detectServerForPath(path);
     if (existing) {
       return NextResponse.json({
         running: true,
@@ -118,17 +122,32 @@ export async function POST(request: NextRequest) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
-      const child = spawn("npm", ["run", "dev", "--", "-p", String(port)], {
-        cwd: path,
-        detached: true,
-        stdio: "ignore",
-      });
+      // -H 127.0.0.1：強制被啟動的子專案 dev server 也只綁本機，不對區網開放
+      const child = spawn(
+        "npm",
+        ["run", "dev", "--", "-p", String(port), "-H", "127.0.0.1"],
+        {
+          cwd: path,
+          detached: true,
+          stdio: "ignore",
+        },
+      );
       child.unref();
 
       if (child.pid) {
         // 輪詢直到 server 真的能連上，而非固定等 2 秒就回報成功
         const ready = await waitForServerReady(port);
         if (!ready) {
+          // 逾時前先收掉剛 spawn 的 child process group，避免留下佔 port 的殭屍 dev server
+          try {
+            process.kill(-child.pid, "SIGTERM");
+          } catch {
+            try {
+              process.kill(child.pid, "SIGTERM");
+            } catch {
+              // process 可能已結束
+            }
+          }
           return NextResponse.json(
             {
               error: "啟動逾時，server 未在時間內開始監聽",
@@ -148,7 +167,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (action === "stop") {
-    const server = detectServerForPath(path);
+    const server = await detectServerForPath(path);
     if (server) {
       try {
         process.kill(-server.pid, "SIGTERM");
@@ -164,7 +183,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (action === "status") {
-    const server = detectServerForPath(path);
+    const server = await detectServerForPath(path);
     if (server) {
       return NextResponse.json({
         running: true,

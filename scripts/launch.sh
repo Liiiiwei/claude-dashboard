@@ -81,8 +81,9 @@ cd "$PROJECT_DIR" || exit 1
 ensure_deps || exit 1
 
 # 3b. 背景啟動 dev server。包一層 bash 在 npm 結束時補寫結束標記，供偵測夭折用
+# -H 127.0.0.1：只綁本機，避免整個區網可存取 dashboard 的所有 API
 DEV_PORT="$PORT" nohup bash -c '
-  npm run dev -- -p "$DEV_PORT"
+  npm run dev -- -p "$DEV_PORT" -H 127.0.0.1
   echo "[launch.sh] DEV_SERVER_EXITED code=$?"
 ' >>"$DEV_LOG" 2>&1 &
 

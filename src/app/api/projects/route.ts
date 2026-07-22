@@ -32,28 +32,30 @@ async function getCachedProjects(): Promise<Project[]> {
 }
 
 // 將即時偵測到的 dev server 對應回各專案（runningPort 屬易變狀態，不進快取）
-function withRunningState(projects: Project[]): Project[] {
-  let servers: { port: number; cwd: string | null }[] = [];
-  try {
-    servers = detectListeningServers();
-  } catch {
-    // 偵測失敗時退回 runningPort = null，不影響專案清單回傳
-    servers = [];
-  }
+// 回傳 degraded：偵測層失敗時為 true，讓前端把「未執行」與「偵測不可用」分開顯示
+async function withRunningState(
+  projects: Project[],
+): Promise<{ projects: Project[]; degraded: boolean }> {
+  const { servers, degraded } = await detectListeningServers();
   const pathToPort = new Map<string, number>();
   for (const s of servers) {
     if (s.cwd) pathToPort.set(s.cwd, s.port);
   }
-  return projects.map((p) => ({
-    ...p,
-    runningPort: pathToPort.get(p.path) ?? null,
-  }));
+  return {
+    projects: projects.map((p) => ({
+      ...p,
+      // 偵測不可用時 runningPort 設 null，但由 degraded 告知前端這不代表「確定未執行」
+      runningPort: pathToPort.get(p.path) ?? null,
+    })),
+    degraded,
+  };
 }
 
 export async function GET() {
   try {
     const projects = await getCachedProjects();
-    return NextResponse.json(withRunningState(projects));
+    const { projects: withState, degraded } = await withRunningState(projects);
+    return NextResponse.json({ projects: withState, degraded });
   } catch (error) {
     console.error("掃描專案失敗:", error);
     return NextResponse.json({ error: "掃描專案失敗" }, { status: 500 });
@@ -64,15 +66,24 @@ export async function PUT(request: NextRequest) {
   const denied = checkOrigin(request);
   if (denied) return denied;
 
-  const { name, status } = await request.json();
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "無效的請求內容" }, { status: 400 });
+  }
+  const { name, status } = (body ?? {}) as { name?: unknown; status?: unknown };
 
   const validStatuses: ProjectStatus[] = ["待辦", "進行中", "已完成", "暫停"];
-  if (!name || !validStatuses.includes(status)) {
+  if (
+    typeof name !== "string" ||
+    !validStatuses.includes(status as ProjectStatus)
+  ) {
     return NextResponse.json({ error: "無效的參數" }, { status: 400 });
   }
 
   try {
-    await setProjectStatus(name, status);
+    await setProjectStatus(name, status as ProjectStatus);
     // 狀態更新後讓快取失效，下次 GET 會重新掃描
     invalidateCache();
     return NextResponse.json({ success: true });
@@ -86,36 +97,74 @@ export async function PATCH(request: NextRequest) {
   const denied = checkOrigin(request);
   if (denied) return denied;
 
-  const { name, field, value } = await request.json();
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "無效的請求內容" }, { status: 400 });
+  }
+  const { name, field, value } = (body ?? {}) as {
+    name?: unknown;
+    field?: unknown;
+    value?: unknown;
+  };
 
-  if (!name || !field) {
+  // 欄位白名單：只接受已知欄位，擋掉未預期的寫入路徑
+  const ALLOWED_FIELDS = [
+    "note",
+    "group",
+    "priority",
+    "pinned",
+    "pinOrder",
+    "exclude",
+    "unexclude",
+    "excludePatterns",
+  ] as const;
+
+  // name 必須是字串，且不可為保留 key（_settings）或原型污染鍵（__proto__ 等）
+  if (
+    typeof name !== "string" ||
+    name === "" ||
+    name === "_settings" ||
+    name.startsWith("__")
+  ) {
+    return NextResponse.json({ error: "無效的參數" }, { status: 400 });
+  }
+  if (
+    typeof field !== "string" ||
+    !ALLOWED_FIELDS.includes(field as (typeof ALLOWED_FIELDS)[number])
+  ) {
+    return NextResponse.json({ error: "不支援的欄位" }, { status: 400 });
+  }
+  // 批次欄位的 value 必須是陣列，否則後續 for...of 會在執行期炸成 500
+  if ((field === "priority" || field === "pinOrder") && !Array.isArray(value)) {
     return NextResponse.json({ error: "無效的參數" }, { status: 400 });
   }
 
   try {
     if (field === "note") {
       const { setProjectNote } = await import("@/lib/config");
-      await setProjectNote(name, value || "");
+      await setProjectNote(name, (value as string) || "");
     } else if (field === "group") {
       const { setProjectGroup } = await import("@/lib/config");
-      await setProjectGroup(name, value || "");
+      await setProjectGroup(name, (value as string) || "");
     } else if (field === "priority") {
-      // 批次更新排序：value 是 { name: string; priority: number }[]
+      // 批次更新排序：value 是 { name: string; priority: number }[]（已驗證為陣列）
       const { batchUpdatePriority } = await import("@/lib/config");
-      await batchUpdatePriority(value);
+      await batchUpdatePriority(value as { name: string; priority: number }[]);
     } else if (field === "pinned") {
       const { setProjectPinned } = await import("@/lib/config");
       await setProjectPinned(name, !!value);
     } else if (field === "pinOrder") {
-      // 批次更新釘選列順序：value 是 { name: string; pinOrder: number }[]
+      // 批次更新釘選列順序：value 是 { name: string; pinOrder: number }[]（已驗證為陣列）
       const { batchUpdatePinOrder } = await import("@/lib/config");
-      await batchUpdatePinOrder(value);
+      await batchUpdatePinOrder(value as { name: string; pinOrder: number }[]);
     } else if (field === "exclude") {
       const { addExcludePattern } = await import("@/lib/config");
-      await addExcludePattern(value);
+      await addExcludePattern(value as string);
     } else if (field === "unexclude") {
       const { removeExcludePattern } = await import("@/lib/config");
-      await removeExcludePattern(value);
+      await removeExcludePattern(value as string);
     } else if (field === "excludePatterns") {
       const { getExcludePatterns } = await import("@/lib/config");
       const patterns = await getExcludePatterns();

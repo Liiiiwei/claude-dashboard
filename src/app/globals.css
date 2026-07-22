@@ -15,6 +15,7 @@ body {
   );
   background-attachment: fixed;
   min-height: 100vh;
+  min-height: 100dvh; /* 支援的瀏覽器改用動態視高，避免行動裝置網址列造成的跳動 */
 }
 
 /* 背景光暈裝飾 */
@@ -71,7 +72,10 @@ body::after {
     0 2px 16px rgba(0, 0, 0, 0.04),
     0 1px 2px rgba(0, 0, 0, 0.02),
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  transition: all 0.2s ease;
+  /* 只過渡會變的屬性，避免 transition: all 波及 backdrop-filter 造成重繪成本 */
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .glass-card:hover {
@@ -330,7 +334,33 @@ body::after {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .toast-enter {
+  /* 尊重使用者減少動態偏好：關閉持續動畫與位移效果 */
+  .toast-enter,
+  .spin,
+  .glass-shimmer {
     animation: none;
+  }
+
+  /* 保留顏色/陰影的細微過渡，但移除位移與縮放的彈跳感 */
+  .glass-card,
+  .glass-button,
+  .glass-button:hover:not(:disabled),
+  .glass-button:active:not(:disabled),
+  .glass-blue,
+  .glass-blue:hover:not(:disabled),
+  .glass-blue:active:not(:disabled),
+  .glass-green,
+  .glass-green:hover:not(:disabled),
+  .glass-green:active:not(:disabled),
+  .glass-amber,
+  .glass-amber:hover:not(:disabled),
+  .glass-amber:active:not(:disabled),
+  .glass-claude,
+  .glass-claude:hover:not(:disabled),
+  .glass-claude:active:not(:disabled) {
+    transform: none;
+    transition:
+      background 0.15s ease,
+      box-shadow 0.15s ease;
   }
 }

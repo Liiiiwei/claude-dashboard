@@ -7,7 +7,7 @@ import {
   removeAssignment,
 } from "@/lib/port-registry";
 import { SCAN_DIR } from "@/lib/paths";
-import { checkOrigin } from "@/lib/api-guard";
+import { checkOrigin, isPathAllowed } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -25,8 +25,8 @@ function resolveProjectName(cwd: string | null): string | null {
 // GET: 合併即時偵測的 process 與 registry 分配表
 export async function GET() {
   try {
-    const [servers, registry] = await Promise.all([
-      Promise.resolve(detectListeningServers()),
+    const [{ servers }, registry] = await Promise.all([
+      detectListeningServers(),
       getAllAssignments(),
     ]);
 
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "killAll") {
-      const servers = detectListeningServers();
+      const { servers } = await detectListeningServers();
       for (const s of servers) {
         try {
           process.kill(-s.pid, "SIGTERM");
@@ -105,9 +105,14 @@ export async function POST(request: NextRequest) {
         projectPath: string;
         port: number;
       };
-      if (!projectPath || !port) {
+      // 驗證 port 為合法數字且落在非特權範圍，杜絕污染值寫入 registry 後流入 killProcessOnPort
+      if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+        return NextResponse.json({ error: "port 不合法" }, { status: 400 });
+      }
+      // 驗證 projectPath 落在掃描目錄內，避免任意路徑被寫入分配表
+      if (!isPathAllowed(projectPath)) {
         return NextResponse.json(
-          { error: "缺少 projectPath 或 port" },
+          { error: "路徑不在允許範圍內" },
           { status: 400 },
         );
       }

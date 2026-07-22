@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useCallback } from "react";
+import React, { useMemo, useState, useRef, useCallback } from "react";
 import type { Project, ProjectStatus } from "@/lib/types";
 import ProjectCard from "./ProjectCard";
 
@@ -64,8 +64,10 @@ interface KanbanColumnProps {
   draggedProject: string | null;
   allGroups?: string[];
   runningPorts: Record<string, number>;
+  degraded?: boolean;
   onUpdate?: () => void;
   onDevServerStarted: (projectPath: string, port: number) => void;
+  onStatusChange: (name: string, status: ProjectStatus) => void;
   onDragStart: (projectName: string) => void;
   onDragOverColumn: (e: React.DragEvent, status: ProjectStatus) => void;
   onDragOverCard: (
@@ -74,7 +76,7 @@ interface KanbanColumnProps {
     index: number,
     projectName: string,
   ) => void;
-  onDragLeave: () => void;
+  onDragLeave: (e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent, status: ProjectStatus) => void;
   onDragEnd: () => void;
 }
@@ -89,8 +91,10 @@ const KanbanColumn = React.memo(function KanbanColumn({
   draggedProject,
   allGroups,
   runningPorts,
+  degraded,
   onUpdate,
   onDevServerStarted,
+  onStatusChange,
   onDragStart,
   onDragOverColumn,
   onDragOverCard,
@@ -118,21 +122,27 @@ const KanbanColumn = React.memo(function KanbanColumn({
           {projects.length}
         </span>
       </div>
-      <div className="space-y-2.5">
+      <ul className="space-y-2.5 list-none m-0 p-0" role="list">
         {projects.length === 0 ? (
-          <p
+          <li
             className={`text-xs text-center py-8 transition-colors ${
               isOver ? "text-gray-600" : "text-gray-400"
             }`}
           >
             {isOver ? "放開以移動到這裡" : "沒有專案"}
-          </p>
+          </li>
         ) : (
           projects.map((project, index) => (
-            <div
+            <li
               key={project.path}
+              role="listitem"
               draggable
-              onDragStart={() => onDragStart(project.name)}
+              onDragStart={(e) => {
+                // Firefox 要求 dragstart 期間必須 setData，否則不會進入拖移狀態
+                e.dataTransfer.setData("text/plain", project.name);
+                e.dataTransfer.effectAllowed = "move";
+                onDragStart(project.name);
+              }}
               onDragOver={(e) => onDragOverCard(e, status, index, project.name)}
               onDragEnd={onDragEnd}
               className={`cursor-grab active:cursor-grabbing transition-all ${
@@ -148,12 +158,14 @@ const KanbanColumn = React.memo(function KanbanColumn({
                 onUpdate={onUpdate}
                 allGroups={allGroups}
                 runningPort={runningPorts[project.path] ?? null}
+                degraded={degraded}
                 onDevServerStarted={onDevServerStarted}
+                onStatusChange={onStatusChange}
               />
-            </div>
+            </li>
           ))
         )}
-      </div>
+      </ul>
     </div>
   );
 });
@@ -164,6 +176,7 @@ interface Props {
   onUpdate?: () => void;
   allGroups?: string[];
   runningPorts: Record<string, number>;
+  degraded?: boolean;
   onDevServerStarted: (projectPath: string, port: number) => void;
 }
 
@@ -173,12 +186,24 @@ export default function KanbanBoard({
   onUpdate,
   allGroups,
   runningPorts,
+  degraded,
   onDevServerStarted,
 }: Props) {
   const [draggedProject, setDraggedProject] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<ProjectStatus | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const dragOverCardRef = useRef<string | null>(null);
+
+  // 依狀態分組並排序一次，讓 KanbanColumn 的 React.memo 能真正生效
+  const columns = useMemo(() => {
+    const map = new Map<ProjectStatus, Project[]>(
+      COLUMNS.map(({ status }) => [status, []]),
+    );
+    for (const p of projects) map.get(p.status)?.push(p);
+    for (const list of map.values())
+      list.sort((a, b) => a.priority - b.priority);
+    return map;
+  }, [projects]);
 
   const handleDragStart = useCallback((projectName: string) => {
     setDraggedProject(projectName);
@@ -210,7 +235,14 @@ export default function KanbanBoard({
     [],
   );
 
-  const handleDragLeave = useCallback(() => {
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    // 游標移入子卡片時 dragleave 也會冒泡到欄位，用 relatedTarget 判斷是否真的離開
+    if (
+      e.relatedTarget instanceof Node &&
+      e.currentTarget.contains(e.relatedTarget)
+    ) {
+      return;
+    }
     setDropTarget(null);
     setDropIndex(null);
     dragOverCardRef.current = null;
@@ -287,9 +319,7 @@ export default function KanbanBoard({
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
       {COLUMNS.map(({ status, theme }) => {
-        const columnProjects = projects
-          .filter((p) => p.status === status)
-          .sort((a, b) => a.priority - b.priority);
+        const columnProjects = columns.get(status)!;
         const isOver = dropTarget === status;
 
         return (
@@ -299,12 +329,14 @@ export default function KanbanBoard({
             theme={theme}
             projects={columnProjects}
             isOver={isOver}
-            dropIndex={dropIndex}
+            dropIndex={isOver ? dropIndex : null}
             draggedProject={draggedProject}
             allGroups={allGroups}
             runningPorts={runningPorts}
+            degraded={degraded}
             onUpdate={onUpdate}
             onDevServerStarted={onDevServerStarted}
+            onStatusChange={onStatusChange}
             onDragStart={handleDragStart}
             onDragOverColumn={handleDragOverColumn}
             onDragOverCard={handleDragOverCard}

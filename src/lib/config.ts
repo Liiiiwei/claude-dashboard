@@ -1,4 +1,4 @@
-import { readFile } from "fs/promises";
+import { readFile, stat } from "fs/promises";
 import { join } from "path";
 import type { ProjectStatus } from "./types";
 import { writeJsonAtomic, withLock } from "./json-store";
@@ -19,30 +19,32 @@ interface SettingsEntry {
   excludePatterns?: string[];
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-interface ProjectsConfig {
-  [key: string]: any;
-}
-
-function asProject(entry: unknown): ProjectConfigEntry {
-  return (entry || {}) as ProjectConfigEntry;
-}
+// 具型別的設定結構：一般 key 是專案設定，_settings 為保留 key 存排除清單
+type ProjectsConfig = Record<string, ProjectConfigEntry | undefined> & {
+  _settings?: SettingsEntry;
+};
 
 const CONFIG_PATH = join(process.cwd(), "projects-config.json");
 
-// Module-level 快取，避免每次操作都讀磁碟
+// Module-level 快取，避免每次操作都讀磁碟。
+// 以檔案 mtime 判斷失效，讓使用者手動編輯 projects-config.json 後 running server 也能讀到新值。
 let configCache: ProjectsConfig | null = null;
+let configCacheMtime = -1;
 
 export async function readConfig(): Promise<ProjectsConfig> {
-  // 有快取直接回傳，不再讀磁碟
-  if (configCache !== null) {
-    return configCache;
-  }
   try {
+    const { mtimeMs } = await stat(CONFIG_PATH);
+    // 快取存在且檔案未被改動 → 直接回傳快取
+    if (configCache !== null && mtimeMs === configCacheMtime) {
+      return configCache;
+    }
     const content = await readFile(CONFIG_PATH, "utf-8");
-    configCache = JSON.parse(content);
-    return configCache!;
+    configCache = JSON.parse(content) as ProjectsConfig;
+    configCacheMtime = mtimeMs;
+    return configCache;
   } catch {
+    // 檔案不存在或讀取失敗：沿用既有快取，否則回空設定
+    if (configCache !== null) return configCache;
     configCache = {};
     return configCache;
   }
@@ -50,8 +52,13 @@ export async function readConfig(): Promise<ProjectsConfig> {
 
 export async function writeConfig(config: ProjectsConfig): Promise<void> {
   await writeJsonAtomic(CONFIG_PATH, config);
-  // 寫入後同步更新快取，保持一致性
-  configCache = config;
+  // 存深拷貝，避免呼叫端後續 mutate 傳入物件時污染快取
+  configCache = structuredClone(config);
+  try {
+    configCacheMtime = (await stat(CONFIG_PATH)).mtimeMs;
+  } catch {
+    configCacheMtime = -1;
+  }
 }
 
 export async function setProjectStatus(
@@ -134,7 +141,7 @@ export async function setProjectPinned(
     const config = await readConfig();
     config[name] = {
       ...config[name],
-      status: (config[name] as ProjectConfigEntry)?.status || "待辦",
+      status: config[name]?.status || "待辦",
       pinned,
     };
     await writeConfig(config);
@@ -149,7 +156,7 @@ export async function batchUpdatePinOrder(
     for (const { name, pinOrder } of updates) {
       config[name] = {
         ...config[name],
-        status: (config[name] as ProjectConfigEntry)?.status || "待辦",
+        status: config[name]?.status || "待辦",
         pinOrder,
       };
     }

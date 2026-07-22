@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const servers = detectListeningServers();
+    const { servers } = await detectListeningServers();
 
     // 將 cwd 對應到專案名稱（取 SCAN_DIR 後的第一層目錄）
     const scanPrefix = SCAN_DIR.endsWith("/") ? SCAN_DIR : SCAN_DIR + "/";

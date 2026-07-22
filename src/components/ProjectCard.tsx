@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
-import type { Project } from "@/lib/types";
+import React, { useMemo, useState, useRef } from "react";
+import type { Project, ProjectStatus } from "@/lib/types";
+import { PROJECT_STATUSES } from "@/lib/types";
 import { useToast } from "./ToastProvider";
+import { useDismiss } from "@/lib/useDismiss";
 
 const TAG_COLORS: Record<string, string> = {
   "Next.js": "glass-blue",
@@ -16,13 +18,15 @@ const TAG_COLORS: Record<string, string> = {
   n8n: "bg-rose-500/15 text-rose-700 border border-rose-300/40",
 };
 
-function activityColor(isoDate: string): string {
+function activityInfo(isoDate: string): { color: string; label: string } {
   const days = Math.floor(
     (Date.now() - new Date(isoDate).getTime()) / 86400000,
   );
-  if (days <= 7) return "bg-green-400";
-  if (days <= 30) return "bg-yellow-400";
-  return "bg-gray-400";
+  if (days <= 7)
+    return { color: "bg-green-400", label: "活躍（一週內有更新）" };
+  if (days <= 30)
+    return { color: "bg-yellow-400", label: "普通（一個月內有更新）" };
+  return { color: "bg-gray-400", label: "沉寂（超過一個月未更新）" };
 }
 
 function timeAgo(isoDate: string): string {
@@ -44,7 +48,10 @@ interface Props {
   onUpdate?: () => void;
   allGroups?: string[];
   runningPort?: number | null;
+  // 後端偵測不可用（degraded）時為 true：無法判定 dev server 是否在跑
+  degraded?: boolean;
   onDevServerStarted?: (projectPath: string, port: number) => void;
+  onStatusChange?: (name: string, status: ProjectStatus) => void;
 }
 
 function ProjectCard({
@@ -52,10 +59,11 @@ function ProjectCard({
   onUpdate,
   allGroups,
   runningPort = null,
+  degraded = false,
   onDevServerStarted,
+  onStatusChange,
 }: Props) {
   const { toast, confirm } = useToast();
-  const [devPort, setDevPort] = useState<number | null>(runningPort);
   const [devLoading, setDevLoading] = useState(false);
   const [openLoading, setOpenLoading] = useState<"finder" | "cmux" | null>(
     null,
@@ -64,25 +72,16 @@ function ProjectCard({
   const [customGroup, setCustomGroup] = useState("");
   const groupPickerRef = useRef<HTMLDivElement>(null);
 
-  // 後端偵測到的執行狀態（runningPort）變動時同步本地顯示
-  useEffect(() => {
-    setDevPort(runningPort);
-  }, [runningPort]);
+  // 點擊分組選單外面或按 Esc 時自動關閉
+  useDismiss(showGroupPicker, groupPickerRef, () => setShowGroupPicker(false));
 
-  // 點擊分組選單外面時自動關閉
-  useEffect(() => {
-    if (!showGroupPicker) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        groupPickerRef.current &&
-        !groupPickerRef.current.contains(e.target as Node)
-      ) {
-        setShowGroupPicker(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [showGroupPicker]);
+  // 分組候選清單（依 allGroups 變動才重算）
+  const groupOptions = useMemo(
+    () => Array.from(new Set([...DEFAULT_GROUPS, ...(allGroups || [])])),
+    [allGroups],
+  );
+
+  const activity = activityInfo(project.lastModified);
 
   const handleOpen = async (action: "finder" | "cmux") => {
     if (openLoading) return;
@@ -162,6 +161,7 @@ function ProjectCard({
   };
 
   const startDevServer = async () => {
+    if (devLoading) return; // 重入保護
     setDevLoading(true);
     try {
       const res = await fetch("/api/dev-server", {
@@ -171,7 +171,6 @@ function ProjectCard({
       });
       const data = await res.json();
       if (data.running) {
-        setDevPort(data.port);
         onDevServerStarted?.(project.path, data.port);
         toast(`已啟動 localhost:${data.port}`, "success");
       } else {
@@ -189,29 +188,35 @@ function ProjectCard({
       {/* 標題列 + 活躍度 */}
       <div className="flex items-start gap-1.5 mb-1">
         <span
-          className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${activityColor(project.lastModified)}`}
-          title="活躍度"
+          className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${activity.color}`}
+          aria-hidden
         />
+        <span className="sr-only">{activity.label}</span>
         <h3 className="font-semibold text-sm break-words flex-1 text-gray-800 leading-tight">
           {project.name}
         </h3>
         <button
           onClick={handlePin}
+          aria-label={
+            project.pinned ? `取消釘選 ${project.name}` : `釘選 ${project.name}`
+          }
+          aria-pressed={project.pinned}
           className={`shrink-0 w-5 h-5 flex items-center justify-center rounded text-xs transition-colors ${
             project.pinned
               ? "text-amber-500 bg-amber-100/60"
-              : "text-gray-400 hover:text-gray-600"
+              : "text-gray-500 hover:text-gray-700"
           }`}
           title={project.pinned ? "取消釘選" : "釘選"}
         >
-          {project.pinned ? "★" : "☆"}
+          <span aria-hidden>{project.pinned ? "★" : "☆"}</span>
         </button>
         <button
           onClick={handleHide}
-          className="shrink-0 w-5 h-5 flex items-center justify-center rounded text-[10px] text-gray-400 hover:text-red-500 transition-colors"
+          aria-label={`隱藏專案 ${project.name}`}
+          className="shrink-0 w-5 h-5 flex items-center justify-center rounded text-[10px] text-gray-500 hover:text-red-500 transition-colors"
           title="隱藏此專案"
         >
-          ✕
+          <span aria-hidden>✕</span>
         </button>
       </div>
 
@@ -225,7 +230,7 @@ function ProjectCard({
       {/* Git 狀態 */}
       {project.git && (
         <div className="flex items-center gap-1.5 text-[11px] mb-1.5">
-          <span className="text-gray-500 bg-white/40 px-1.5 py-0.5 rounded border border-white/50">
+          <span className="text-gray-600 bg-white/40 px-1.5 py-0.5 rounded border border-white/50">
             ⎇ {project.git.branch}
           </span>
           {project.git.dirty > 0 && (
@@ -243,31 +248,35 @@ function ProjectCard({
       >
         <button
           onClick={() => setShowGroupPicker(!showGroupPicker)}
+          aria-haspopup="menu"
+          aria-expanded={showGroupPicker}
           className={`px-1.5 py-0.5 text-[11px] rounded-full transition-colors ${
             project.group
               ? "glass-accent text-indigo-600 font-medium"
-              : "glass-button text-gray-400 border border-dashed border-gray-300/60"
+              : "glass-button text-gray-500 border border-dashed border-gray-300/60"
           }`}
         >
           {project.group || "+ 分組"}
         </button>
         {showGroupPicker && (
-          <div className="absolute top-7 left-0 z-20 glass rounded-xl p-2 shadow-xl min-w-[160px]">
-            {Array.from(new Set([...DEFAULT_GROUPS, ...(allGroups || [])])).map(
-              (g) => (
-                <button
-                  key={g}
-                  onClick={() => saveGroup(g)}
-                  className={`block w-full text-left px-3 py-1.5 text-xs rounded-lg hover:bg-white/40 transition-colors ${
-                    project.group === g
-                      ? "text-indigo-600 font-medium"
-                      : "text-gray-600"
-                  }`}
-                >
-                  {g}
-                </button>
-              ),
-            )}
+          <div
+            role="menu"
+            className="absolute top-7 left-0 z-20 glass rounded-xl p-2 shadow-xl min-w-[160px]"
+          >
+            {groupOptions.map((g) => (
+              <button
+                key={g}
+                role="menuitem"
+                onClick={() => saveGroup(g)}
+                className={`block w-full text-left px-3 py-1.5 text-xs rounded-lg hover:bg-white/40 transition-colors ${
+                  project.group === g
+                    ? "text-indigo-600 font-medium"
+                    : "text-gray-600"
+                }`}
+              >
+                {g}
+              </button>
+            ))}
             <div className="border-t border-white/40 mt-1 pt-1">
               <div className="flex gap-1">
                 <input
@@ -280,12 +289,14 @@ function ProjectCard({
                     saveGroup(customGroup.trim())
                   }
                   placeholder="自訂分組..."
-                  className="flex-1 bg-white/30 text-xs px-2 py-1.5 rounded-lg border border-white/50 text-gray-700 focus:outline-none focus:border-indigo-400 placeholder:text-gray-400"
+                  aria-label="自訂分組名稱"
+                  className="flex-1 bg-white/30 text-xs px-2 py-1.5 rounded-lg border border-white/50 text-gray-700 focus:outline-none focus:border-indigo-400 placeholder:text-gray-500"
                 />
               </div>
             </div>
             {project.group && (
               <button
+                role="menuitem"
                 onClick={() => saveGroup("")}
                 className="block w-full text-left px-3 py-1.5 text-xs text-red-500 hover:bg-white/40 rounded-lg mt-1 transition-colors"
               >
@@ -305,10 +316,33 @@ function ProjectCard({
       </div>
 
       {/* 時間資訊 */}
-      <div className="text-[11px] text-gray-400 truncate mb-2">
+      <div className="text-[11px] text-gray-500 truncate mb-2">
         {timeAgo(project.lastModified)} 更新
         {project.lastCommit && <span> · {project.lastCommit}</span>}
       </div>
+
+      {/* 狀態變更（鍵盤可達的看板替代方案） */}
+      {onStatusChange && (
+        <div className="mb-2">
+          <label className="sr-only" htmlFor={`status-${project.name}`}>
+            變更「{project.name}」狀態
+          </label>
+          <select
+            id={`status-${project.name}`}
+            value={project.status}
+            onChange={(e) =>
+              onStatusChange(project.name, e.target.value as ProjectStatus)
+            }
+            className="w-full glass-button rounded-lg px-2 py-1 text-[11px] text-gray-600 focus:outline-none"
+          >
+            {PROJECT_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* 操作按鈕 */}
       <div className="flex gap-1.5">
@@ -334,15 +368,23 @@ function ProjectCard({
       {/* Dev Server 按鈕 */}
       {project.hasDevScript && (
         <div className="mt-1.5">
-          {devPort ? (
+          {runningPort ? (
             <a
-              href={`http://localhost:${devPort}`}
+              href={`http://localhost:${runningPort}`}
               target="_blank"
               rel="noopener noreferrer"
               className="block text-center px-2 py-1.5 text-xs glass-green rounded-lg"
             >
-              localhost:{devPort}
+              localhost:{runningPort}
             </a>
+          ) : degraded ? (
+            // 偵測不可用：無法判定是否在跑，避免誤示為「未執行」
+            <div
+              className="w-full px-2 py-1.5 text-xs glass-button rounded-lg text-center text-gray-500"
+              title="無法偵測 dev server 狀態"
+            >
+              偵測不可用
+            </div>
           ) : (
             <button
               onClick={startDevServer}

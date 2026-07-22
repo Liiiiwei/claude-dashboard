@@ -1,4 +1,4 @@
-import { readFile } from "fs/promises";
+import { readFile, stat } from "fs/promises";
 import { join } from "path";
 import { writeJsonAtomic, withLock } from "./json-store";
 
@@ -12,10 +12,14 @@ interface PortRegistry {
   autoAssign: boolean;
 }
 
-const REGISTRY_PATH = join(process.cwd(), "port-registry.json");
+// 預設寫在專案根目錄；可用 PORT_REGISTRY_PATH 覆寫（測試用隔離檔案，避免動到正式資料）
+const REGISTRY_PATH =
+  process.env.PORT_REGISTRY_PATH || join(process.cwd(), "port-registry.json");
 
-// 模組級快取，避免重複讀取檔案
+// 模組級快取，避免重複讀取檔案。以 mtime 判斷失效，
+// 讓使用者手動編輯 port-registry.json 後 running server 也能讀到新值。
 let registryCache: PortRegistry | null = null;
+let registryCacheMtime = -1;
 
 // 預設值，當檔案不存在時使用
 const DEFAULT_REGISTRY: PortRegistry = {
@@ -24,14 +28,20 @@ const DEFAULT_REGISTRY: PortRegistry = {
   autoAssign: true,
 };
 
-// 讀取 registry，有快取機制
+// 讀取 registry，有快取機制（以 mtime 判斷是否需重讀）
 async function readRegistry(): Promise<PortRegistry> {
-  if (registryCache !== null) return registryCache;
   try {
+    const { mtimeMs } = await stat(REGISTRY_PATH);
+    if (registryCache !== null && mtimeMs === registryCacheMtime) {
+      return registryCache;
+    }
     const content = await readFile(REGISTRY_PATH, "utf-8");
-    registryCache = JSON.parse(content);
-    return registryCache!;
+    registryCache = JSON.parse(content) as PortRegistry;
+    registryCacheMtime = mtimeMs;
+    return registryCache;
   } catch {
+    // 檔案不存在或讀取失敗：沿用既有快取，否則回預設值
+    if (registryCache !== null) return registryCache;
     registryCache = { ...DEFAULT_REGISTRY, assignments: {} };
     return registryCache;
   }
@@ -40,7 +50,13 @@ async function readRegistry(): Promise<PortRegistry> {
 // 寫入 registry 並同步更新快取（原子寫入，避免半截壞檔）
 async function writeRegistry(registry: PortRegistry): Promise<void> {
   await writeJsonAtomic(REGISTRY_PATH, registry);
-  registryCache = registry;
+  // 存深拷貝，避免呼叫端後續 mutate 傳入物件時污染快取
+  registryCache = structuredClone(registry);
+  try {
+    registryCacheMtime = (await stat(REGISTRY_PATH)).mtimeMs;
+  } catch {
+    registryCacheMtime = -1;
+  }
 }
 
 // 取得專案的固定 port；若尚未分配且 autoAssign=true，自動分配下一個可用 port
