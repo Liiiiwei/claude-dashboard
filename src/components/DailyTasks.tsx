@@ -21,7 +21,19 @@ function taskKey(task: DailyTask): string {
   return `${task.sourceFile}:${task.lineNumber}`;
 }
 
-// 依 client 分組，維持任務原始出現順序決定客戶排序
+// 到期日排序值：無到期日者用遠期哨兵殿後
+function dueSortValue(due: string | null): string {
+  return due ?? "9999-12-31";
+}
+
+// 依到期日升冪比較（無到期日殿後）
+function byDue(a: DailyTask, b: DailyTask): number {
+  const av = dueSortValue(a.due);
+  const bv = dueSortValue(b.due);
+  return av < bv ? -1 : av > bv ? 1 : 0;
+}
+
+// 依 client 分組；各群內待辦按到期日升冪，客戶群再依最早到期日排序
 function groupByClient(
   tasks: DailyTask[],
 ): { client: string; tasks: DailyTask[] }[] {
@@ -31,7 +43,17 @@ function groupByClient(
     if (arr) arr.push(t);
     else map.set(t.client, [t]);
   }
-  return Array.from(map, ([client, list]) => ({ client, tasks: list }));
+  const groups = Array.from(map, ([client, list]) => ({
+    client,
+    tasks: list.slice().sort(byDue),
+  }));
+  // tasks 已按到期日排序，第一筆即該客戶最早到期日
+  groups.sort((a, b) => {
+    const av = dueSortValue(a.tasks[0]?.due ?? null);
+    const bv = dueSortValue(b.tasks[0]?.due ?? null);
+    return av < bv ? -1 : av > bv ? 1 : 0;
+  });
+  return groups;
 }
 
 // 後端 failed reason 轉人話
@@ -119,14 +141,17 @@ function ClientGroup({
   tasks,
   selected,
   onToggle,
+  onToggleAll,
 }: {
   client: string;
   tasks: DailyTask[];
   selected: Set<string>;
   onToggle: (task: DailyTask) => void;
+  onToggleAll: (tasks: DailyTask[]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const selectedCount = tasks.filter((t) => selected.has(taskKey(t))).length;
+  const allSelected = selectedCount === tasks.length && tasks.length > 0;
 
   return (
     <div className="rounded-xl bg-white/30 border border-white/40">
@@ -156,16 +181,26 @@ function ClientGroup({
         </span>
       </button>
       {open && (
-        <ul className="flex flex-col gap-2 px-2 pb-2">
-          {tasks.map((task) => (
-            <TaskRow
-              key={taskKey(task)}
-              task={task}
-              checked={selected.has(taskKey(task))}
-              onToggle={onToggle}
-            />
-          ))}
-        </ul>
+        <div className="px-2 pb-2">
+          <div className="flex justify-end px-1 pb-1.5">
+            <button
+              onClick={() => onToggleAll(tasks)}
+              className="text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
+            >
+              {allSelected ? "取消全選" : "全選"}
+            </button>
+          </div>
+          <ul className="flex flex-col gap-2">
+            {tasks.map((task) => (
+              <TaskRow
+                key={taskKey(task)}
+                task={task}
+                checked={selected.has(taskKey(task))}
+                onToggle={onToggle}
+              />
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
@@ -217,6 +252,18 @@ export default function DailyTasks() {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
+      return next;
+    });
+  };
+
+  // 單一客戶全選／取消全選：作用於該客戶的所有待辦
+  const toggleClientAll = (tasks: DailyTask[]) => {
+    const keys = tasks.map(taskKey);
+    const allSelected = keys.every((k) => selected.has(k));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) keys.forEach((k) => next.delete(k));
+      else keys.forEach((k) => next.add(k));
       return next;
     });
   };
@@ -304,7 +351,7 @@ export default function DailyTasks() {
   // ── success ──
   const activeTasks = data.groups[activeCategory] ?? [];
   const clientGroups = groupByClient(activeTasks);
-  const uncategorized = data.groups.uncategorized ?? [];
+  const uncategorized = (data.groups.uncategorized ?? []).slice().sort(byDue);
   const uncatCount = data.counts.uncategorized;
   const selectedCount = selected.size;
 
@@ -437,6 +484,7 @@ export default function DailyTasks() {
               tasks={g.tasks}
               selected={selected}
               onToggle={toggleTask}
+              onToggleAll={toggleClientAll}
             />
           ))}
         </div>
