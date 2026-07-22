@@ -50,8 +50,14 @@ interface Props {
   runningPort?: number | null;
   // 後端偵測不可用（degraded）時為 true：無法判定 dev server 是否在跑
   degraded?: boolean;
+  // 專案清單載入中：此時狀態下拉不應可操作
+  loading?: boolean;
   onDevServerStarted?: (projectPath: string, port: number) => void;
-  onStatusChange?: (name: string, status: ProjectStatus) => void;
+  // 回傳 boolean 代表成功與否，讓卡片能顯示 pending / 失敗回饋
+  onStatusChange?: (
+    name: string,
+    status: ProjectStatus,
+  ) => void | Promise<boolean>;
 }
 
 function ProjectCard({
@@ -60,10 +66,17 @@ function ProjectCard({
   allGroups,
   runningPort = null,
   degraded = false,
+  loading = false,
   onDevServerStarted,
   onStatusChange,
 }: Props) {
   const { toast, confirm } = useToast();
+  // 狀態變更進行中的目標值（樂觀顯示）；null 代表沒有進行中的變更
+  const [pendingStatus, setPendingStatus] = useState<ProjectStatus | null>(
+    null,
+  );
+  // 上一次變更失敗：短暫紅框回饋，值已回彈為 project.status
+  const [statusFailed, setStatusFailed] = useState(false);
   const [devLoading, setDevLoading] = useState(false);
   const [openLoading, setOpenLoading] = useState<"finder" | "cmux" | null>(
     null,
@@ -329,11 +342,22 @@ function ProjectCard({
           </label>
           <select
             id={`status-${project.name}`}
-            value={project.status}
-            onChange={(e) =>
-              onStatusChange(project.name, e.target.value as ProjectStatus)
-            }
-            className="w-full glass-button rounded-lg px-2 py-1 text-[11px] text-gray-600 focus:outline-none"
+            value={pendingStatus ?? project.status}
+            disabled={loading || degraded || pendingStatus !== null}
+            aria-busy={pendingStatus !== null}
+            onChange={async (e) => {
+              const next = e.target.value as ProjectStatus;
+              setStatusFailed(false);
+              setPendingStatus(next);
+              // onStatusChange 可能回傳 void（看板拖移共用）或 Promise<boolean>
+              const ok = await onStatusChange(project.name, next);
+              // 失敗才顯示回饋；成功時 project.status 已由父層更新，值自然同步
+              if (ok === false) setStatusFailed(true);
+              setPendingStatus(null);
+            }}
+            className={`w-full glass-button rounded-lg px-2 py-1 text-[11px] text-gray-600 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed ${
+              statusFailed ? "ring-1 ring-red-400/70" : ""
+            }`}
           >
             {PROJECT_STATUSES.map((s) => (
               <option key={s} value={s}>

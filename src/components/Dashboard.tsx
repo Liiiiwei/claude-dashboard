@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import type { Project, ProjectStatus } from "@/lib/types";
+import { useState, useCallback, useMemo } from "react";
+import type { ProjectStatus } from "@/lib/types";
 import ProjectCard from "./ProjectCard";
 import FilterBar from "./FilterBar";
 import SkeletonCard from "./SkeletonCard";
@@ -9,20 +9,33 @@ import KanbanBoard from "./KanbanBoard";
 import PinnedBar from "./PinnedBar";
 import PortManager from "./PortManager";
 import SystemStatsBar from "./SystemStatsBar";
+import CommitDialog from "./CommitDialog";
 import { useToast } from "./ToastProvider";
 import { useLocalStorageState } from "@/lib/useLocalStorageState";
-import { useModalA11y } from "@/lib/useModalA11y";
+import { useProjects } from "@/lib/useProjects";
+import { useRunningPorts } from "@/lib/useRunningPorts";
 
 export default function Dashboard() {
   const { toast } = useToast();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  // 後端偵測不可用時為 true：無法判定各專案 dev server 是否在跑
-  const [degraded, setDegraded] = useState(false);
+  // 專案清單：取數 + 防競態邏輯抽到 useProjects
+  const {
+    projects,
+    setProjects,
+    loading,
+    error,
+    degraded,
+    refetch: fetchProjects,
+  } = useProjects();
+  // 執行中 port 的單一真實來源：Dashboard 卡片與 PortManager 都消費它
+  const {
+    data: portsData,
+    status: portsStatus,
+    refetch: refetchPorts,
+    runningPortsByPath,
+    registerStarted,
+  } = useRunningPorts();
+
   const [showCommitDialog, setShowCommitDialog] = useState(false);
-  const [commitMsg, setCommitMsg] = useState("");
-  const [committing, setCommitting] = useState(false);
 
   // 使用者偏好：以 localStorage 同步，避免 hydration mismatch（見 hook 實作）
   const [tab, setTab] = useLocalStorageState<"projects" | "daily">(
@@ -46,59 +59,6 @@ export default function Dashboard() {
     "kanban",
   );
 
-  const [runningPorts, setRunningPorts] = useState<Record<string, number>>({});
-  const hasLoadedRef = useRef(false);
-  // 請求序號與 AbortController：避免競態與對已卸載元件 setState
-  const reqIdRef = useRef(0);
-  const abortRef = useRef<AbortController | null>(null);
-
-  const fetchProjects = useCallback(async () => {
-    const reqId = ++reqIdRef.current;
-    // 中止前一個仍在飛的請求
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    try {
-      setError(null);
-      if (!hasLoadedRef.current) setLoading(true);
-      const res = await fetch("/api/projects", { signal: controller.signal });
-      if (!res.ok) throw new Error("掃描失敗");
-      const raw = await res.json();
-      // 相容兩種回應格式：裸 Project[] 或 { projects, degraded }
-      const data: Project[] = Array.isArray(raw) ? raw : (raw.projects ?? []);
-      const isDegraded = !Array.isArray(raw) && raw.degraded === true;
-      // 只有最新一次請求可以寫入狀態
-      if (reqId !== reqIdRef.current) return;
-      setProjects(data);
-      setDegraded(isDegraded);
-      // 用後端即時偵測結果補上正在執行的 server，讓初次載入就能看到狀態
-      setRunningPorts((prev) => {
-        const next = { ...prev };
-        for (const p of data) {
-          if (p.runningPort != null) next[p.path] = p.runningPort;
-          else if (next[p.path] != null) delete next[p.path];
-        }
-        return next;
-      });
-      hasLoadedRef.current = true;
-    } catch (err) {
-      // 主動中止不算錯誤
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      if (reqId !== reqIdRef.current) return;
-      setError(err instanceof Error ? err.message : "未知錯誤");
-    } finally {
-      if (reqId === reqIdRef.current) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchProjects();
-    return () => {
-      // 卸載時中止仍在飛的請求
-      abortRef.current?.abort();
-    };
-  }, [fetchProjects]);
-
   const dirtyCount = useMemo(
     () => projects.filter((p) => p.git && p.git.dirty > 0).length,
     [projects],
@@ -114,48 +74,9 @@ export default function Dashboard() {
     return c;
   }, [projects]);
 
-  const handleBatchCommit = useCallback(async () => {
-    // 重入保護：提交中或訊息為空直接返回
-    if (committing || !commitMsg.trim()) return;
-    setCommitting(true);
-    try {
-      const res = await fetch("/api/git-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: commitMsg.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "批次提交失敗");
-      const failed =
-        data.results?.filter((r: { success: boolean }) => !r.success) || [];
-      if (failed.length > 0) {
-        toast(
-          `已提交 ${data.committed} 個專案，${failed.length} 個失敗`,
-          "error",
-        );
-      } else {
-        toast(`已提交 ${data.committed} 個專案`, "success");
-      }
-      setShowCommitDialog(false);
-      setCommitMsg("");
-      fetchProjects();
-    } catch (err) {
-      toast(err instanceof Error ? err.message : "批次提交失敗", "error");
-    } finally {
-      setCommitting(false);
-    }
-  }, [committing, commitMsg, toast, fetchProjects]);
-
-  const closeCommitDialog = useCallback(() => {
-    setShowCommitDialog(false);
-    setCommitMsg("");
-  }, []);
-
-  // 批次提交對話框的 a11y（focus trap / Esc / 焦點還原）
-  const commitDialogRef = useModalA11y(showCommitDialog, closeCommitDialog);
-
+  // 回傳是否成功，讓卡片能顯示 pending / 失敗回饋
   const handleStatusChange = useCallback(
-    async (name: string, status: ProjectStatus) => {
+    async (name: string, status: ProjectStatus): Promise<boolean> => {
       try {
         const res = await fetch("/api/projects", {
           method: "PUT",
@@ -166,18 +87,21 @@ export default function Dashboard() {
         setProjects((prev) =>
           prev.map((p) => (p.name === name ? { ...p, status } : p)),
         );
+        return true;
       } catch {
         toast("狀態更新失敗", "error");
+        return false;
       }
     },
-    [toast],
+    [toast, setProjects],
   );
 
   const handleDevServerStarted = useCallback(
     (projectPath: string, port: number) => {
-      setRunningPorts((prev) => ({ ...prev, [projectPath]: port }));
+      // 樂觀登記到單一真實來源，並立即補抓 /api/ports
+      registerStarted(projectPath, port);
     },
-    [],
+    [registerStarted],
   );
 
   const allTags = useMemo(
@@ -222,7 +146,7 @@ export default function Dashboard() {
         toast("取消釘選失敗", "error");
       }
     },
-    [toast],
+    [toast, setProjects],
   );
 
   // 拖移釘選列重新排序：optimistic 更新 + PATCH 寫回
@@ -252,7 +176,7 @@ export default function Dashboard() {
         toast("儲存順序失敗", "error");
       }
     },
-    [toast],
+    [toast, setProjects],
   );
 
   const filtered = useMemo(
@@ -328,8 +252,12 @@ export default function Dashboard() {
       {/* 系統狀態列（自帶輪詢，與專案資料解耦） */}
       <SystemStatsBar />
 
-      {/* Port 管理 */}
-      <PortManager />
+      {/* Port 管理（消費單一真實來源，與卡片同步） */}
+      <PortManager
+        data={portsData}
+        status={portsStatus}
+        onRefetch={refetchPorts}
+      />
 
       {/* 釘選列 */}
       {pinnedProjects.length > 0 && (
@@ -440,8 +368,8 @@ export default function Dashboard() {
                 <SkeletonCard key={i} />
               ))}
             </div>
-          ) : error ? // 錯誤時不顯示空狀態，橫幅已在上方呈現
-          null : sorted.length === 0 ? (
+          ) : error ? null : sorted // 錯誤時不顯示空狀態，橫幅已在上方呈現
+            .length === 0 ? (
             <div className="text-center py-20 text-gray-500">
               <p className="text-lg">沒有找到任何專案</p>
               <p className="text-sm mt-2">
@@ -456,7 +384,7 @@ export default function Dashboard() {
               onStatusChange={handleStatusChange}
               onUpdate={fetchProjects}
               allGroups={allGroups}
-              runningPorts={runningPorts}
+              runningPorts={runningPortsByPath}
               degraded={degraded}
               onDevServerStarted={handleDevServerStarted}
             />
@@ -468,8 +396,9 @@ export default function Dashboard() {
                   project={project}
                   onUpdate={fetchProjects}
                   allGroups={allGroups}
-                  runningPort={runningPorts[project.path] ?? null}
+                  runningPort={runningPortsByPath[project.path] ?? null}
                   degraded={degraded}
+                  loading={loading}
                   onDevServerStarted={handleDevServerStarted}
                   onStatusChange={handleStatusChange}
                 />
@@ -499,55 +428,11 @@ export default function Dashboard() {
 
       {/* 批次提交對話框 */}
       {showCommitDialog && (
-        <div
-          className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50"
-          onClick={closeCommitDialog}
-        >
-          <div
-            ref={commitDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="commit-dialog-title"
-            className="glass rounded-2xl p-6 w-full max-w-md mx-4 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2
-              id="commit-dialog-title"
-              className="text-lg font-bold text-gray-800 mb-1"
-            >
-              批次 Git 提交
-            </h2>
-            <p className="text-sm text-gray-500 mb-4">
-              將對 {dirtyCount} 個有變更的專案執行 git add -A && git commit
-            </p>
-            <input
-              type="text"
-              value={commitMsg}
-              onChange={(e) => setCommitMsg(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleBatchCommit()}
-              placeholder="輸入 commit 訊息..."
-              aria-label="commit 訊息"
-              disabled={committing}
-              className="w-full bg-white/40 text-gray-700 rounded-xl px-4 py-3 border border-white/50 focus:border-amber-400 focus:outline-none mb-4 placeholder:text-gray-500 disabled:opacity-60"
-              autoFocus
-            />
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={closeCommitDialog}
-                className="px-4 py-2 text-sm glass-button rounded-xl text-gray-600"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleBatchCommit}
-                disabled={committing || !commitMsg.trim()}
-                className="px-4 py-2 text-sm glass-amber rounded-xl disabled:opacity-50"
-              >
-                {committing ? "提交中..." : "確認提交"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <CommitDialog
+          dirtyCount={dirtyCount}
+          onClose={() => setShowCommitDialog(false)}
+          onCommitted={fetchProjects}
+        />
       )}
     </main>
   );

@@ -63,23 +63,30 @@ body::after {
     inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
+/*
+ * P2-8 效能收斂：移除 .glass-card 自身的 backdrop-filter。
+ * 看板一次會顯示數十張專案卡（ProjectCard / SkeletonCard 皆用此 class），
+ * 每張各自一層 backdrop-filter 會疊出數十個 GPU 合成層，拖移時容易掉幀。
+ * 改法：卡片改用較高不透明度的半透明白底來維持層次感，真正的毛玻璃只保留在
+ * 看板欄位容器（KanbanBoard 的 .kanban-column，一次只有 4 層）底下透出。
+ * 少量的面板（error 頁、空狀態、Toast）也共用此 class，一併不再各自 blur，
+ * 但數量少、視覺影響極小。下拉選單／對話框仍各自保留 blur（數量少）。
+ */
 .glass-card {
-  background: rgba(255, 255, 255, 0.45);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.6);
   box-shadow:
     0 2px 16px rgba(0, 0, 0, 0.04),
     0 1px 2px rgba(0, 0, 0, 0.02),
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  /* 只過渡會變的屬性，避免 transition: all 波及 backdrop-filter 造成重繪成本 */
+  /* 只過渡會變的屬性，避免 transition: all 波及重繪成本 */
   transition:
     background 0.2s ease,
     box-shadow 0.2s ease;
 }
 
 .glass-card:hover {
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.85);
   box-shadow:
     0 4px 24px rgba(0, 0, 0, 0.06),
     0 1px 2px rgba(0, 0, 0, 0.03),

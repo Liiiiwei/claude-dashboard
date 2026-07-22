@@ -107,7 +107,8 @@ const KanbanColumn = React.memo(function KanbanColumn({
       onDragOver={(e) => onDragOverColumn(e, status)}
       onDragLeave={onDragLeave}
       onDrop={(e) => onDrop(e, status)}
-      className={`rounded-xl p-3 min-h-[200px] transition-colors backdrop-blur-sm ${
+      // P2-8：毛玻璃收斂在欄位這一層（整個看板僅 4 層合成），卡片本身不再各自 blur
+      className={`rounded-xl p-3 min-h-[200px] transition-colors backdrop-blur-md ${
         isOver ? theme.overTint : theme.tint
       }`}
     >
@@ -126,7 +127,7 @@ const KanbanColumn = React.memo(function KanbanColumn({
         {projects.length === 0 ? (
           <li
             className={`text-xs text-center py-8 transition-colors ${
-              isOver ? "text-gray-600" : "text-gray-400"
+              isOver ? "text-gray-600" : "text-gray-500"
             }`}
           >
             {isOver ? "放開以移動到這裡" : "沒有專案"}

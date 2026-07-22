@@ -1,25 +1,19 @@
 "use client";
 
-import { useState, useCallback, useMemo, useRef } from "react";
-import { usePolling } from "@/lib/usePolling";
+import { useMemo, useState } from "react";
+import type {
+  PortInfo,
+  PortsResponse,
+  PortsLoadStatus,
+} from "@/lib/useRunningPorts";
 import { useToast } from "./ToastProvider";
 
-interface PortInfo {
-  pid: number;
-  port: number;
-  projectName: string | null;
-  projectPath: string | null;
-  cpu: number;
-  mem: number;
-  assigned: boolean;
+interface Props {
+  // 由 Dashboard 的 useRunningPorts 提供：與專案卡片共用的單一真實來源
+  data: PortsResponse | null;
+  status: PortsLoadStatus;
+  onRefetch: () => Promise<void>;
 }
-
-interface PortsResponse {
-  ports: PortInfo[];
-  registry: Record<string, number>;
-}
-
-type LoadStatus = "loading" | "error" | "ready";
 
 // 把路徑縮短成「.../父資料夾/專案名」
 function shortPath(path: string): string {
@@ -28,31 +22,11 @@ function shortPath(path: string): string {
   return ".../" + parts.slice(-3).join("/");
 }
 
-export default function PortManager() {
+export default function PortManager({ data, status, onRefetch }: Props) {
   const { toast, confirm } = useToast();
-  const [data, setData] = useState<PortsResponse | null>(null);
-  const [status, setStatus] = useState<LoadStatus>("loading");
   const [killing, setKilling] = useState<number | null>(null);
   const [killingAll, setKillingAll] = useState(false);
   const [cleaning, setCleaning] = useState(false);
-  const hasLoadedRef = useRef(false);
-
-  const fetchPorts = useCallback(async () => {
-    try {
-      const res = await fetch("/api/ports");
-      if (!res.ok) throw new Error("讀取失敗");
-      const json: PortsResponse = await res.json();
-      setData(json);
-      setStatus("ready");
-      hasLoadedRef.current = true;
-    } catch {
-      // 已載入過就沿用舊資料、不打斷；首次載入失敗才進入錯誤態
-      if (!hasLoadedRef.current) setStatus("error");
-    }
-  }, []);
-
-  // 每 10 秒輪詢，分頁不可見時暫停
-  usePolling(fetchPorts, 10000);
 
   const handleKill = async (pid: number, projectName?: string | null) => {
     const ok = await confirm(
@@ -66,7 +40,7 @@ export default function PortManager() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "kill", pid }),
       });
-      if (res.ok) await fetchPorts();
+      if (res.ok) await onRefetch();
       else toast("終止失敗", "error");
     } catch {
       toast("終止失敗", "error");
@@ -87,7 +61,7 @@ export default function PortManager() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "killAll" }),
       });
-      if (res.ok) await fetchPorts();
+      if (res.ok) await onRefetch();
       else toast("終止失敗", "error");
     } catch {
       toast("終止失敗", "error");
@@ -138,7 +112,7 @@ export default function PortManager() {
           failed++;
         }
       }
-      await fetchPorts();
+      await onRefetch();
       if (failed > 0) toast(`清理完成，${failed} 個失敗`, "error");
       else toast("已清理重複 process", "success");
     } finally {
@@ -173,7 +147,7 @@ export default function PortManager() {
       <div className="glass rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-3 text-xs">
         <span className="text-red-600">無法讀取 port 狀態</span>
         <button
-          onClick={fetchPorts}
+          onClick={onRefetch}
           className="glass-button rounded-lg px-2.5 py-1 text-red-700"
         >
           重試
